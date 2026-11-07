@@ -903,22 +903,30 @@ function renderVideo(args, value) {
   } else if (transcriptNote !== undefined) {
     tail.push(`<transcript unavailable="${transcriptNote}"/>`);
   }
-  // A reading protocol, not decoration: describing the difference before the content, and
-  // guessing the next moment before looking at it, catches far more misreadings than one
-  // pass of "summarise this video".
+  // A reading protocol, not decoration: declaring a hypothesis, checking each prediction,
+  // and comparing against the previous chunk are what turn "describe these stills" into a
+  // readable line of reasoning. The protocol adapts to what the caller already knows.
   if (frames.length >= 3) {
-    const steps = [
-      '<how_to_read>',
-      '1. Go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',
-      Array.isArray(deltas) && deltas.length > 0
-        ? 'Use <deltas> to see which gaps are the big ones; a large gap is usually a cut, and a small one means the camera stayed put.'
-        : 'Judge the size of each change from the images themselves.',
-      '2. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held and what it got wrong.',
-      carry === undefined
-        ? '3. Finish with one paragraph in time order: what the clip is, what happens, and what you could not see. Never invent dialogue or events the frames do not show.'
-        : '3. Begin by checking <carry> against what you now see: which earlier claims still hold and which these moments contradict. Then finish with an updated paragraph in time order.',
-      '</how_to_read>',
-    ];
+    const steps = ['<how_to_read>'];
+    if (carry === undefined) {
+      steps.push(
+        '0. Before describing anything, state what you think this is: the kind of clip, the setting, and the arc you expect — each backed by a cell. Say it as a hypothesis that can turn out wrong.',
+        '1. Then go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',
+        Array.isArray(deltas) && deltas.length > 0
+          ? 'Use <deltas> to see which gaps are the big ones; a large gap is usually a cut, and a small one means the camera stayed put.'
+          : 'Judge the size of each change from the images themselves.',
+        '2. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held, and what it got wrong.',
+        '3. Finish with one paragraph in time order: what the clip is, what happens, and what you could not see. Never invent dialogue or events the frames do not show.',
+      );
+    } else {
+      steps.push(
+        '1. Begin by comparing <carry> with what you now see: which earlier claims still hold, and which these moments contradict.',
+        '2. Then write one line per moment as a ledger: expected X | saw Y | held or broken. Keep the expectation and the observation separate — that difference is the point of this read.',
+        '3. Name the cells where the clip most sharply broke your expectation; a deliberate edit usually sits exactly there.',
+        '4. Finish with an updated paragraph in time order that replaces the carried summary. Never invent dialogue or events the frames do not show.',
+      );
+    }
+    steps.push('</how_to_read>');
     tail.push(steps.join('\n'));
   }
   if (warnings !== undefined && warnings.length > 0) {

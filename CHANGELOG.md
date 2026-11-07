@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- **The reading protocol adapts to what the caller already knows.** A first read now opens
+  with a hypothesis (kind of clip, setting, expected arc, each backed by a cell) before
+  describing anything; a continuation read that carries a previous summary opens with a
+  ledger instead: expected X | saw Y | held or broken, then names the cells that broke the
+  expectation most sharply. The point is to expose the reasoning, not just the conclusion.
+
 ## 0.3.1
 
 - **Gap deltas.** Every pair of consecutive moments now reports how much the picture moved

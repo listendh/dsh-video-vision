@@ -507,7 +507,7 @@ await scenario('gaps between moments report how much the picture moved', { path:
 await scenario('a carried summary is echoed back for long clips', { path: 'sample.mp4', frames: 3, carry: '前一段：一个彩色测试图在缓慢变化' }, (value, blocks) => {
   const text = blocks.map((block) => block.text ?? '').join('\n');
   assert.match(text, /<carry>\n前一段：一个彩色测试图在缓慢变化\n<\/carry>/u);
-  assert.match(text, /checking <carry> against what you now see/u);
+  assert.match(text, /comparing <carry> with what you now see/u);
 });
 
 await scenario('a video without an audio track', { path: 'silent.mp4', frames: 2 }, (value) => {
