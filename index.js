@@ -439,8 +439,9 @@ async function transcribeAudio(ctx, ffmpeg, hostPath, options) {
         return {
           note: `no speech-to-text service is mounted, so the audio was not transcribed; it was saved to ${target} — if a transcription tool is available, transcribe that file and continue`,
         };
-      } catch {
-        return { note: 'this profile registers no speech-to-text provider, so the audio track was not transcribed' };
+      } catch (error) {
+        const why = error instanceof Error ? error.message : String(error);
+        return { note: 'this profile registers no speech-to-text provider and audio extraction failed (' + why + '), so the audio track was not transcribed' };
       }
     }
     const wav = await grabAudioWav(ffmpeg, hostPath, { maxSeconds: maxAudioSeconds, signal });
