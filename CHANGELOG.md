@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.5
+
+- **Fixed: repeat detection compared motion instead of pictures.** A talking head keeps moving
+  (blinking, fingers, breathing), so summing the motion between two moments made every pair
+  look different: a 28-second clip of one person got twelve nearly identical cells and
+  "0 repeats dropped". The scan now also keeps a 16x9 thumbnail per sample, and repeats are
+  decided by the distance between thumbnails — the same face lands around 0.04-0.08, a real
+  cut around 0.13 and up. Measured on that clip: 12 cells became 5, and a fast-cut AMV kept
+  all 12, so the change does not touch edited footage.
+- Selection is farthest-point first: the ends are kept and the moment furthest from everything
+  already kept is added until nothing is distinct enough. Walking the list in order kept the
+  first four seconds and dropped the other twenty-four.
+- **Fixed: a single-shot clip reported "1 of the 1 detected shots were not shown"**, which
+  contradicted the frames it had just returned.
+- A dropped moment is always accounted for: `frames.length + sampling.deduped` equals the
+  number requested, and the tests assert it.
+
 ## 0.3.4
 
 - **Fixed: the gap table said "large" everywhere on long clips.** It used to report the peak

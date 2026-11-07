@@ -55,9 +55,9 @@
         # A shot whose average change per second stays below this counts as still and is
         # capped at one frame, so it cannot soak up the budget.
         staticShotFloor: 0.02
-        # Moments this similar in content (almost no motion in between) count as repeats;
-        # the later one is dropped.
-        minCellNovelty: 0.02
+        # Distance between two 16x9 thumbnails below which a moment counts as a repeat of one
+        # already kept (0.05 measured on real clips: same face 0.04-0.08, a cut 0.13+).
+        minCellNovelty: 0.05
         # Seconds of audio prepared for transcription, and its language hint. The
         # language also picks among several subtitle tracks.
         maxAudioSeconds: 600

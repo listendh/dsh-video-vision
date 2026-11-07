@@ -12,7 +12,7 @@
 
 import { basename, resolve as resolvePath } from 'node:path';
 
-import { pickChangeMoments, scanActivity } from './lib/activity.js';
+import { pickChangeMoments, scanActivity, signatureDistance } from './lib/activity.js';
 import { composeGrid, planGrid } from './lib/grid.js';
 import {
   extractSubtitleStream,
@@ -49,7 +49,7 @@ const DEFAULTS = {
   gridWhenAtLeast: 6,
   textFirst: false,
   staticShotFloor: 0.02,
-  minCellNovelty: 0.02,
+  minCellNovelty: 0.05,
   maxAudioSeconds: 600,
   language: 'zh',
   transcript: true,
@@ -528,6 +528,10 @@ async function readVideo(ctx, config, args, exec) {
   let shotsInfo;
   /** Change samples from the scan, reused later for the between-cell delta table. */
   let scanChanges;
+  /** Thumbnails of every scanned sample, used to spot repeated pictures. */
+  let scanSignatures;
+  /** Scan rate, needed to map a sampled moment back to its thumbnail. */
+  let scanRate;
   /** Detected cut positions, reused for the per-gap cut counts. */
   let shotBoundaries;
   // Text-first reads want an even sweep: burned-in subtitles change on their own schedule,
@@ -568,6 +572,8 @@ async function readVideo(ctx, config, args, exec) {
           signal: exec.signal,
         });
         scanChanges = scan.changes;
+        scanSignatures = scan.signatures;
+        scanRate = scanFps;
         const detected = detectShots(scan.changes, {
           duration: info.durationSeconds,
           fps: scanFps,
@@ -609,6 +615,8 @@ async function readVideo(ctx, config, args, exec) {
           });
           positions = picked.timestamps;
           sampling = { strategy: 'auto', changeFrames: picked.changeFrames, scannedSeconds };
+          // One shot and every frame came from it: saying otherwise would be a false report.
+          shotsInfo.covered = 1;
         }
       } catch (error) {
         warnings.push(`motion scan failed, frames were spaced evenly instead: ${error instanceof Error ? error.message : String(error)}`);
@@ -634,11 +642,13 @@ async function readVideo(ctx, config, args, exec) {
   // Text-first reads keep every moment: burned-in subtitles change while the picture does
   // not, and a 64x36 proxy cannot see that change, so deduplicating there would delete the
   // very lines the caller asked for.
-  if (scanChanges !== undefined && !textFirst && positions.length > 2) {
+  if (scanSignatures !== undefined && !textFirst && positions.length > 2) {
     const deduped = dropRepeatedMoments({
       timestamps: positions,
-      changes: scanChanges,
-      minNovelty: Math.max(0.001, pick(config, 'minCellNovelty', DEFAULTS.minCellNovelty)),
+      signatures: scanSignatures,
+      fps: scanRate,
+      minDistance: Math.max(0.005, pick(config, 'minCellNovelty', DEFAULTS.minCellNovelty)),
+      distanceOf: signatureDistance,
     });
     if (deduped.dropped > 0) {
       positions = deduped.timestamps;
@@ -971,7 +981,9 @@ function renderVideo(args, value) {
   // A reading protocol, not decoration: declaring a hypothesis, checking each prediction,
   // and comparing against the previous chunk are what turn "describe these stills" into a
   // readable line of reasoning. The protocol adapts to what the caller already knows.
-  if (frames.length >= 3) {
+  // Two moments are enough to be worth a protocol: repeat-dropping can legitimately leave a
+  // still clip with only a pair, and "compare these two frames" is still a useful read.
+  if (frames.length >= 2) {
     const steps = ['<how_to_read>'];
     if (textFirst) {
       // News clips, tutorials and screen recordings put their content in the words: the
