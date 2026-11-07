@@ -10,7 +10,9 @@
  * @module dsh-video-vision
  */
 
+import { readFileSync, statSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve as resolvePath } from 'node:path';
 
@@ -548,7 +550,13 @@ async function readVideo(ctx, config, args, exec) {
 
   const source = await resolveSource(ctx, exec, requested);
   const warnings = [];
-  warnings.push('plugin module loaded from ' + import.meta.url);
+  try {
+    const selfPath = fileURLToPath(import.meta.url);
+    const self = readFileSync(selfPath, 'utf8');
+    warnings.push('plugin module ' + selfPath + ' bytes=' + self.length + ' handover=' + self.includes('it was saved to') + ' mtime=' + statSync(selfPath).mtime.toISOString());
+  } catch (error) {
+    warnings.push('plugin self-check failed: ' + (error instanceof Error ? error.message : String(error)));
+  }
   const ffmpeg = await findFfmpeg({
     configuredPath: pick(config, 'ffmpegPath', DEFAULTS.ffmpegPath),
     signal: exec.signal,
