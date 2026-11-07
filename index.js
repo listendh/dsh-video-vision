@@ -1098,6 +1098,8 @@ function renderVideo(args, value) {
       'For each object say whether it is really in the scene or added in post, and what tells you so: a held object moves with the hand, an overlay stays fixed while the camera moves, and a printed card has a straight edge and casts no shadow of its own.',
       'Describe what you see before naming it. When the name of a food, brand, place, or object is genuinely uncertain, check it (a lookup, or a region re-read) instead of guessing — a verified name is evidence, an unverified one is invention.',
       'Count the instances: how many people, how many pairs of shoes, cups, chairs. Repeated identical things are usually the subject itself, never write them off as passers-by or background.',
+      'Tally the words: which noun repeats most across captions, titles, item names and search prompts? A repeated name is a topic candidate, and the biggest text is not automatically the point.',
+      'The point is often the thing being shown off or loved - a cute creature, a dish, an outfit - while the achievement or the headline is only what triggers the film. Say which is which.',
       'If this result hands you an audio file path, transcribe it before drawing conclusions: the spoken words often carry the point of the clip, and half of the meaning can be in the sound.',
     ];
     if (textFirst) {
