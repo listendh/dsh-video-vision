@@ -52,10 +52,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aaaaa-1111111/dsh-video-vision.git"
+    "url": "git+https://github.com/listendh/dsh-video-vision.git"
   },
   "bugs": {
-    "url": "https://github.com/aaaaa-1111111/dsh-video-vision/issues"
+    "url": "https://github.com/listendh/dsh-video-vision/issues"
   },
-  "homepage": "https://github.com/aaaaa-1111111/dsh-video-vision#readme"
+  "homepage": "https://github.com/listendh/dsh-video-vision#readme"
 }

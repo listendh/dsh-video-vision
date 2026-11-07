@@ -5,7 +5,7 @@
 - The package now points at its public repository, so the registry page links to the
   source, issues, and README.
 - Both READMEs document installing straight from the source tree
-  (`dsh plugin add github:aaaaa-1111111/dsh-video-vision`) for an unreleased change or
+  (`dsh plugin add github:listendh/dsh-video-vision`) for an unreleased change or
   when the registry is unreachable.
 - No runtime change.
 

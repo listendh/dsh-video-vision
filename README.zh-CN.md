@@ -48,10 +48,10 @@ dsh plugin add dsh-video-vision
 从源码安装（新版发布前想先试，或者 npm 装不上时）：
 
 ```sh
-dsh plugin add github:aaaaa-1111111/dsh-video-vision
+dsh plugin add github:listendh/dsh-video-vision
 ```
 
-源码地址：<https://github.com/aaaaa-1111111/dsh-video-vision>
+源码地址：<https://github.com/listendh/dsh-video-vision>
 
 工具名是 `read_video`。其它什么都不变：不用视频的场景，行为和以前一模一样。
 

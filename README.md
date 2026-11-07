@@ -53,10 +53,10 @@ Straight from the source tree, to try an unreleased change or when the registry 
 unreachable:
 
 ```sh
-dsh plugin add github:aaaaa-1111111/dsh-video-vision
+dsh plugin add github:listendh/dsh-video-vision
 ```
 
-Repository: <https://github.com/aaaaa-1111111/dsh-video-vision>
+Repository: <https://github.com/listendh/dsh-video-vision>
 
 The tool appears as `read_video`. Nothing else changes: models without a video request
 keep working exactly as before.
