@@ -238,3 +238,26 @@ node test/verify.mjs --strict <dir>        # 再用 @deepseek-ai/dsh-tools 做�
 ## 许可
 
 MIT。本包只调用运行时环境里的 ffmpeg，不重分发它；那个可执行文件遵守它自己的许可。
+
+## 让模型"听见"声音（音频识别）
+
+有些视频一半内容在音频里。本插件不打包语音模型（那会把 40KB 变成上百 MB），而是把音频交出去，让 dsh 自己接。
+
+有三种接法，从省事到麻烦：
+
+| 方案 | 做法 | 特点 |
+|---|---|---|
+| **1. dsh 自带语音服务** | profile 里挂了 speech-to-text 服务时自动生效，无需配置 | 最省事；插件自动转写，结果带时间轴 |
+| **2. 装一个语音插件（工具型）** | 如 `dsh plugin add dsh-voice`，配上任意 OpenAI 兼容的 ASR 密钥 | 本插件检测不到语音服务时，会把音频写成 wav 并给出路径，dsh 直接拿这个文件去调转写工具即可 |
+| **3. 完全离线** | 本地跑 whisper 类模型（whisper.cpp / faster-whisper） | 不依赖网络和密钥，代价是下模型（百 MB 级）、首次慢 |
+
+### 国内可用的 OpenAI 兼容 ASR
+
+Groq 需要外网。国内可用**硅基流动**（https://cloud.siliconflow.cn，手机号注册，有免费额度）：
+
+- 接口地址：`https://api.siliconflow.cn/v1`
+- 模型：`FunAudioLLM/SenseVoiceSmall`
+
+填到语音插件对应的 `baseUrl / model / apiKey` 三处即可。
+
+没有语音能力时，`read_video` 会如实说明并给出音频文件路径——**不会假装听过**。

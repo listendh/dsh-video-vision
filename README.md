@@ -261,3 +261,17 @@ scan and frame placement), `lib/subtitles.js` (cue parsing and rendering),
 
 MIT. This package shells out to ffmpeg at runtime and does not redistribute it; the
 binary carries its own license.
+
+## Letting the model hear the audio
+
+Half of some videos is in the sound. This package does not bundle a speech model (that would turn 40 KB into hundreds of MB); it hands the audio over instead.
+
+| Route | How | Notes |
+|---|---|---|
+| **1. dsh speech service** | works automatically when the profile mounts a speech-to-text service | no setup; transcript comes with timestamps |
+| **2. A tool-style voice plugin** | e.g. `dsh plugin add dsh-voice` plus any OpenAI-compatible ASR key | with no speech service, this tool writes the audio to a wav and reports its path, so the agent can transcribe it with whatever tool it has |
+| **3. Fully offline** | whisper.cpp / faster-whisper locally | no network and no key; costs a model download (hundreds of MB) |
+
+China-friendly OpenAI-compatible ASR: SiliconFlow (`https://cloud.siliconflow.cn`), endpoint `https://api.siliconflow.cn/v1`, model `FunAudioLLM/SenseVoiceSmall`. Groq needs an external network.
+
+When no speech capability exists, `read_video` says so and reports the audio path — it never pretends to have listened.
