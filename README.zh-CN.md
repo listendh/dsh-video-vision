@@ -106,9 +106,10 @@ decoded by ffmpeg N-92722-gf22fcd4483
 </content>
 <cells>#1=1.35s  #2=4.30s  #3=5.90s  #4=10.17s  …</cells>
 <deltas>
-how much the picture moved between neighbouring moments:
-#5->#6 0.404 (large, usually a cut)
-#11->#12 0.000 (almost still)
+what happens between neighbouring moments:
+#5->#6 1 cut, steady cutting
+#8->#9 8 cuts, steady cutting
+#11->#12 no cuts, one continuous take
 </deltas>
 [图片：一张带编号的宫格]
 <how_to_read>
@@ -119,9 +120,11 @@ how much the picture moved between neighbouring moments:
 ```
 
 时间标签烧在格子角上，还附一份 `#n=秒` 的对照表，所以模型能直接说"第 5 格"。
-**变化量表**（`<deltas>`）来自镜头检测用的同一个彩色代理，告诉模型哪两格之间变化最大——
-这是它光看静帧说不出来的。`<how_to_read>` 要求"先差异、再预测、后核对"，因为只让它
-"总结一下这个视频"，它会漏掉切点，还会自己补出不存在的连续性。
+**变化量表**（`<deltas>`）数的是两格之间有**几个切点**——不是取"变化最大的那一刻"。
+这一点很关键：间隔超过几秒之后，每段里必然有切点，取峰值会让每一段都写成"变化很大"，
+等于什么都没说；**切点密度**在 25 秒的剪辑和 4 分钟的 vlog 里含义一致（3 秒一刀都算快剪）。
+`<how_to_read>` 要求"先差异、再预测、后核对"，因为只让它"总结一下这个视频"，它会漏掉切点，
+还会自己补出不存在的连续性。
 
 ### 长视频怎么分段读
 

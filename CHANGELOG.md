@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.4
+
+- **Fixed: the gap table said "large" everywhere on long clips.** It used to report the peak
+  picture change between two moments, so once moments sit thirteen seconds apart every gap
+  contains a cut and every row read `large (usually a cut)`. On a 4-minute vlog that was eleven
+  identical lines — a table that costs tokens and says nothing. Gaps now report **how many
+  cuts sit inside them** plus the cut density, so `#8->#9 8 cuts, steady cutting` stands out
+  next to `#1->#2 1 cut, a few cuts`, and "one cut in three seconds" means fast cutting whether
+  the clip is 25 seconds or four minutes. Found by testing a real 233-second phone vlog.
+
 ## 0.3.3
 
 - **Still shots no longer soak up the budget.** Slots are allocated by how much is happening

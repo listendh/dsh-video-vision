@@ -114,9 +114,10 @@ decoded by ffmpeg N-92722-gf22fcd4483
 </content>
 <cells>#1=1.35s  #2=4.30s  #3=5.90s  #4=10.17s  …</cells>
 <deltas>
-how much the picture moved between neighbouring moments:
-#5->#6 0.404 (large, usually a cut)
-#11->#12 0.000 (almost still)
+what happens between neighbouring moments:
+#5->#6 1 cut, steady cutting
+#8->#9 8 cuts, steady cutting
+#11->#12 no cuts, one continuous take
 </deltas>
 [image: one labelled contact sheet]
 <how_to_read>
@@ -126,10 +127,12 @@ how much the picture moved between neighbouring moments:
 </how_to_read>
 ```
 
-The delta table is measured from the same colour proxy the shot detector uses, so the model
-learns *which* gaps are the big ones — a comparison it cannot make from stills alone. The
-protocol asks for difference → prediction → check, because one pass of "summarise this video"
-misses cuts and invents continuity.
+The delta table counts the cuts that sit between two moments, using the same proxy the shot
+detector uses. Counting beats measuring the peak change: past a few seconds every gap contains
+a cut, so a peak-based table says "large" everywhere and tells the model nothing. Cut density
+stays comparable across a 25-second edit and a 4-minute vlog — one cut in three seconds is fast
+cutting in both. The protocol asks for difference → prediction → check, because one pass of
+"summarise this video" misses cuts and invents continuity.
 
 ### Reading a long video in chunks
 

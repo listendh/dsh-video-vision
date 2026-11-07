@@ -494,14 +494,21 @@ await scenario('grid layout delivers one contact sheet', { path: 'cuts.mp4', fra
   assert.ok(images[0].attachment.width >= 4 * 160, 'cells keep a usable width');
 });
 
-await scenario('gaps between moments report how much the picture moved', { path: 'cuts.mp4', frames: 6, layout: 'frames' }, (value, blocks) => {
+await scenario('gaps between moments report the cuts inside them', { path: 'cuts.mp4', frames: 6, layout: 'frames' }, (value, blocks) => {
   assert.ok(Array.isArray(value.deltas) && value.deltas.length >= 3, 'one delta per gap');
+  let totalCuts = 0;
   value.deltas.forEach((delta) => {
     assert.equal(delta.to, delta.from + 1, 'deltas describe neighbouring moments');
-    assert.ok(['big', 'medium', 'small'].includes(delta.level));
+    assert.ok(['fast', 'steady', 'light', 'still'].includes(delta.level), `unexpected level ${delta.level}`);
+    assert.ok(delta.cuts >= 0 && delta.rate >= 0);
+    totalCuts += delta.cuts;
   });
+  // The clip is three patterns joined by two hard cuts, so the sampled gaps must account for
+  // them instead of reporting an identical "some change" everywhere.
+  assert.ok(totalCuts >= 1, `at least one gap should contain a cut, got ${totalCuts}`);
   const text = blocks.map((block) => block.text ?? '').join('\n');
   assert.match(text, /<deltas>/u);
+  assert.match(text, /cut/u);
   assert.match(text, /<how_to_read>/u, 'the reading protocol travels with the images');
   assert.match(text, /guess what it will show/u);
 });

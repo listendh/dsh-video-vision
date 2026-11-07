@@ -221,10 +221,11 @@ const OUTPUT_SCHEMA = {
         properties: {
           from: { type: 'number' },
           to: { type: 'number' },
-          delta: { type: 'number' },
+          cuts: { type: 'number' },
+          rate: { type: 'number' },
           level: { type: 'string' },
         },
-        required: ['from', 'to', 'delta', 'level'],
+        required: ['from', 'to', 'cuts', 'rate', 'level'],
       },
     },
     bounds: {
@@ -527,6 +528,8 @@ async function readVideo(ctx, config, args, exec) {
   let shotsInfo;
   /** Change samples from the scan, reused later for the between-cell delta table. */
   let scanChanges;
+  /** Detected cut positions, reused for the per-gap cut counts. */
+  let shotBoundaries;
   // Text-first reads want an even sweep: burned-in subtitles change on their own schedule,
   // which has nothing to do with where the picture moves most.
   const textFirst = typeof args.text === 'boolean' ? args.text : pick(config, 'textFirst', DEFAULTS.textFirst);
@@ -574,6 +577,7 @@ async function readVideo(ctx, config, args, exec) {
         });
         const scannedSeconds = Math.round(scan.sampledSeconds * 100) / 100;
         shotsInfo = { count: detected.shots.length, method: detected.method, covered: 0 };
+        shotBoundaries = detected.shots.slice(1).map((shot) => shot.start);
         if (detected.shots.length >= 2) {
           // One frame per shot is how an edit with many cuts gets real coverage: the budget
           // buys different shots instead of several peaks inside the same one.
@@ -741,10 +745,12 @@ async function readVideo(ctx, config, args, exec) {
     throw new Error(`cannot read "${source.displayPath}" as a video: no frame could be decoded${detail}`);
   }
 
-  // How much the picture moved between two sampled moments. A vision model can see that
-  // cell 8 looks different from cell 7, but not that this gap is the biggest one in the
-  // clip: that comparison needs the whole signal, which the scan already produced.
-  const deltas = scanChanges === undefined ? [] : betweenDeltas(scanChanges, frames);
+  // Pacing between two sampled moments. A vision model can see that cell 8 looks different
+  // from cell 7, but not how many cuts sit between them or how fast the clip is moving there:
+  // that comparison needs the whole signal, which the scan already produced.
+  const deltas = scanChanges === undefined
+    ? []
+    : betweenDeltas(scanChanges, frames, shotBoundaries ?? []);
 
   const audio = await transcribeAudio(ctx, ffmpeg, source.hostPath, {
     language: typeof args.language === 'string' && args.language.trim() !== ''
@@ -814,31 +820,46 @@ function secondsLabel(seconds) {
   return `${seconds.toFixed(2)}s`;
 }
 
-/** Change magnitude at which a gap between two sampled moments is called large. */
-const DELTA_BIG = 0.15;
-/** Change magnitude at which a gap is called noticeable rather than still. */
-const DELTA_MEDIUM = 0.06;
-
 /**
- * Measure how much the picture moved between each pair of consecutive samples.
+ * Describe what happens between each pair of consecutive samples.
+ *
+ * The peak change inside a gap sounds right and is useless past a few seconds: any thirteen
+ * second window contains a cut, so every gap comes back "large". What stays meaningful is
+ * *how many cuts* sit inside the gap, which describes pacing instead of merely detecting
+ * that something happened.
  * @param {readonly { seconds: number, score: number }[]} changes - change samples from the scan.
  * @param {readonly { seconds: number }[]} moments - the sampled positions, ascending.
- * @returns {{ from: number, to: number, delta: number, level: 'big' | 'medium' | 'small' }[]} per-gap peaks.
+ * @param {readonly number[]} boundaries - detected cut positions.
+ * @returns {{ from: number, to: number, cuts: number, rate: number, level: 'fast' | 'steady' | 'light' | 'still' }[]} per-gap pacing.
  */
-function betweenDeltas(changes, moments) {
+function betweenDeltas(changes, moments, boundaries) {
   const deltas = [];
   for (let index = 1; index < moments.length; index += 1) {
     const from = moments[index - 1].seconds;
     const to = moments[index].seconds;
-    if (to - from < 0.05) continue;
-    let peak = 0;
+    const span = to - from;
+    if (span < 0.05) continue;
+    let movement = 0;
+    let sampled = 0;
     for (const change of changes) {
       if (change.seconds <= from || change.seconds > to) continue;
-      if (change.score > peak) peak = change.score;
+      movement += change.score;
+      sampled += 1;
     }
-    if (peak === 0) continue;
-    const level = peak >= DELTA_BIG ? 'big' : peak >= DELTA_MEDIUM ? 'medium' : 'small';
-    deltas.push({ from: index, to: index + 1, delta: Math.round(peak * 1000) / 1000, level });
+    if (sampled === 0) continue;
+    const rate = movement / span;
+    const cuts = boundaries.filter((boundary) => boundary > from && boundary <= to).length;
+    // Pacing is cut density, not pixel motion: a handheld vlog moves the picture constantly
+    // without cutting, and calling that "fast" would say nothing about the edit.
+    const cutsPerSecond = cuts / span;
+    const level = cuts === 0 ? 'still' : cutsPerSecond >= 0.35 ? 'fast' : cutsPerSecond >= 0.12 ? 'steady' : 'light';
+    deltas.push({
+      from: index,
+      to: index + 1,
+      cuts,
+      rate: Math.round(rate * 1000) / 1000,
+      level,
+    });
   }
   return deltas;
 }
@@ -887,11 +908,12 @@ function renderVideo(args, value) {
     }
   }
   if (Array.isArray(deltas) && deltas.length > 0) {
-    const marks = { big: 'large, usually a cut', medium: 'some change', small: 'almost still' };
+    const marks = { fast: 'fast cutting', steady: 'steady cutting', light: 'a few cuts', still: 'one continuous take' };
     lines.push('<deltas>');
-    lines.push('how much the picture moved between neighbouring moments:');
+    lines.push('what happens between neighbouring moments:');
     for (const delta of deltas) {
-      lines.push(`#${delta.from}->#${delta.to} ${delta.delta.toFixed(3)} (${marks[delta.level] ?? delta.level})`);
+      const cutText = delta.cuts === 0 ? 'no cuts' : `${delta.cuts} cut${delta.cuts === 1 ? '' : 's'}`;
+      lines.push(`#${delta.from}->#${delta.to} ${cutText}, ${marks[delta.level] ?? delta.level}`);
     }
     lines.push('</deltas>');
   }
