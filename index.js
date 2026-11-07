@@ -104,6 +104,10 @@ const PARAMETERS = {
       enum: ['auto', 'frames', 'grid'],
       description: 'How sampled frames are delivered: `grid` sends one labelled contact sheet (cheap, wide coverage), `frames` sends each frame as its own image (more detail per moment), `auto` picks grid for larger frame counts.',
     },
+    carry: {
+      type: 'string',
+      description: 'Summary of the part of the clip you already read. Pass the previous summary here when reading a long video in chunks, so this read continues from it instead of starting over.',
+    },
     language: {
       type: 'string',
       description: 'Language hint for the transcript and for choosing among several subtitle tracks, such as zh or en.',
@@ -200,6 +204,20 @@ const OUTPUT_SCHEMA = {
         covered: { type: 'number' },
       },
       required: ['count', 'method', 'covered'],
+    },
+    deltas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          from: { type: 'number' },
+          to: { type: 'number' },
+          delta: { type: 'number' },
+          level: { type: 'string' },
+        },
+        required: ['from', 'to', 'delta', 'level'],
+      },
     },
     bounds: {
       type: 'object',
@@ -498,6 +516,8 @@ async function readVideo(ctx, config, args, exec) {
   let positions;
   let sampling = { strategy: 'explicit' };
   let shotsInfo;
+  /** Change samples from the scan, reused later for the between-cell delta table. */
+  let scanChanges;
   if (explicit.length > 0) {
     let clamped = 0;
     positions = [...new Set(explicit.map((value) => Math.max(0, Math.round(value * 1000) / 1000)))].sort((a, b) => a - b);
@@ -531,6 +551,7 @@ async function readVideo(ctx, config, args, exec) {
           limitSeconds: Math.ceil(info.durationSeconds),
           signal: exec.signal,
         });
+        scanChanges = scan.changes;
         const detected = detectShots(scan.changes, {
           duration: info.durationSeconds,
           fps: scanFps,
@@ -682,6 +703,11 @@ async function readVideo(ctx, config, args, exec) {
     throw new Error(`cannot read "${source.displayPath}" as a video: no frame could be decoded${detail}`);
   }
 
+  // How much the picture moved between two sampled moments. A vision model can see that
+  // cell 8 looks different from cell 7, but not that this gap is the biggest one in the
+  // clip: that comparison needs the whole signal, which the scan already produced.
+  const deltas = scanChanges === undefined ? [] : betweenDeltas(scanChanges, frames);
+
   const audio = await transcribeAudio(ctx, ffmpeg, source.hostPath, {
     language: typeof args.language === 'string' && args.language.trim() !== ''
       ? args.language.trim()
@@ -731,6 +757,7 @@ async function readVideo(ctx, config, args, exec) {
     sampling,
     ...(shotsInfo === undefined ? {} : { shots: shotsInfo }),
     ...(grid === undefined ? {} : { grid }),
+    ...(deltas.length === 0 ? {} : { deltas }),
     ...(subtitleResult.subtitles === undefined ? {} : { subtitles: subtitleResult.subtitles }),
     ...(subtitleResult.subtitles !== undefined || subtitleResult.note === undefined ? {} : { subtitleNote: subtitleResult.note }),
     ...(transcript === undefined ? {} : { transcript }),
@@ -748,13 +775,43 @@ function secondsLabel(seconds) {
   return `${seconds.toFixed(2)}s`;
 }
 
+/** Change magnitude at which a gap between two sampled moments is called large. */
+const DELTA_BIG = 0.15;
+/** Change magnitude at which a gap is called noticeable rather than still. */
+const DELTA_MEDIUM = 0.06;
+
+/**
+ * Measure how much the picture moved between each pair of consecutive samples.
+ * @param {readonly { seconds: number, score: number }[]} changes - change samples from the scan.
+ * @param {readonly { seconds: number }[]} moments - the sampled positions, ascending.
+ * @returns {{ from: number, to: number, delta: number, level: 'big' | 'medium' | 'small' }[]} per-gap peaks.
+ */
+function betweenDeltas(changes, moments) {
+  const deltas = [];
+  for (let index = 1; index < moments.length; index += 1) {
+    const from = moments[index - 1].seconds;
+    const to = moments[index].seconds;
+    if (to - from < 0.05) continue;
+    let peak = 0;
+    for (const change of changes) {
+      if (change.seconds <= from || change.seconds > to) continue;
+      if (change.score > peak) peak = change.score;
+    }
+    if (peak === 0) continue;
+    const level = peak >= DELTA_BIG ? 'big' : peak >= DELTA_MEDIUM ? 'medium' : 'small';
+    deltas.push({ from: index, to: index + 1, delta: Math.round(peak * 1000) / 1000, level });
+  }
+  return deltas;
+}
+
 /**
  * Render one structured read as the model-facing envelope plus timestamped images.
  * @param {Record<string, unknown>} value - the validated result.
  * @returns {Array<Record<string, unknown>>} content blocks: text, then each frame's caption and image.
  */
-function renderVideo(value) {
-  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, shots, grid, warnings, decoder } = value;
+function renderVideo(args, value) {
+  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, shots, grid, deltas, warnings, decoder } = value;
+  const carry = typeof args?.carry === 'string' && args.carry.trim() !== '' ? args.carry.trim() : undefined;
   const placement = sampling?.strategy === 'explicit'
     ? 'positions were requested explicitly'
     : sampling?.strategy === 'shots'
@@ -785,6 +842,20 @@ function renderVideo(value) {
     if (shots !== undefined && shots.covered < shots.count) {
       lines.push(`(${shots.count - shots.covered} of the ${shots.count} detected shots were not shown; pass a narrower start/end or more frames to cover them)`);
     }
+  }
+  if (Array.isArray(deltas) && deltas.length > 0) {
+    const marks = { big: 'large, usually a cut', medium: 'some change', small: 'almost still' };
+    lines.push('<deltas>');
+    lines.push('how much the picture moved between neighbouring moments:');
+    for (const delta of deltas) {
+      lines.push(`#${delta.from}->#${delta.to} ${delta.delta.toFixed(3)} (${marks[delta.level] ?? delta.level})`);
+    }
+    lines.push('</deltas>');
+  }
+  if (carry !== undefined) {
+    lines.push('<carry>');
+    lines.push(carry);
+    lines.push('</carry>');
   }
   const blocks = [{ type: 'text', text: lines.join('\n') }];
   if (grid !== undefined) {
@@ -832,6 +903,24 @@ function renderVideo(value) {
   } else if (transcriptNote !== undefined) {
     tail.push(`<transcript unavailable="${transcriptNote}"/>`);
   }
+  // A reading protocol, not decoration: describing the difference before the content, and
+  // guessing the next moment before looking at it, catches far more misreadings than one
+  // pass of "summarise this video".
+  if (frames.length >= 3) {
+    const steps = [
+      '<how_to_read>',
+      '1. Go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',
+      Array.isArray(deltas) && deltas.length > 0
+        ? 'Use <deltas> to see which gaps are the big ones; a large gap is usually a cut, and a small one means the camera stayed put.'
+        : 'Judge the size of each change from the images themselves.',
+      '2. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held and what it got wrong.',
+      carry === undefined
+        ? '3. Finish with one paragraph in time order: what the clip is, what happens, and what you could not see. Never invent dialogue or events the frames do not show.'
+        : '3. Begin by checking <carry> against what you now see: which earlier claims still hold and which these moments contradict. Then finish with an updated paragraph in time order.',
+      '</how_to_read>',
+    ];
+    tail.push(steps.join('\n'));
+  }
   if (warnings !== undefined && warnings.length > 0) {
     tail.push('<warnings>');
     for (const warning of warnings) tail.push(`- ${warning}`);
@@ -864,7 +953,7 @@ export function apply(ctx, rawConfig) {
     parameters: PARAMETERS,
     output: {
       schema: OUTPUT_SCHEMA,
-      render: (_args, value) => renderVideo(value),
+      render: (args, value) => renderVideo(args, value),
       presentationMeta: (_args, value) => ({ path: value.source.path }),
     },
     presentCall(args) {

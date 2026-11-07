@@ -492,6 +492,24 @@ await scenario('grid layout delivers one contact sheet', { path: 'cuts.mp4', fra
   assert.ok(images[0].attachment.width >= 4 * 160, 'cells keep a usable width');
 });
 
+await scenario('gaps between moments report how much the picture moved', { path: 'cuts.mp4', frames: 6, layout: 'frames' }, (value, blocks) => {
+  assert.ok(Array.isArray(value.deltas) && value.deltas.length >= 3, 'one delta per gap');
+  value.deltas.forEach((delta) => {
+    assert.equal(delta.to, delta.from + 1, 'deltas describe neighbouring moments');
+    assert.ok(['big', 'medium', 'small'].includes(delta.level));
+  });
+  const text = blocks.map((block) => block.text ?? '').join('\n');
+  assert.match(text, /<deltas>/u);
+  assert.match(text, /<how_to_read>/u, 'the reading protocol travels with the images');
+  assert.match(text, /guess what it will show/u);
+});
+
+await scenario('a carried summary is echoed back for long clips', { path: 'sample.mp4', frames: 3, carry: '前一段：一个彩色测试图在缓慢变化' }, (value, blocks) => {
+  const text = blocks.map((block) => block.text ?? '').join('\n');
+  assert.match(text, /<carry>\n前一段：一个彩色测试图在缓慢变化\n<\/carry>/u);
+  assert.match(text, /checking <carry> against what you now see/u);
+});
+
 await scenario('a video without an audio track', { path: 'silent.mp4', frames: 2 }, (value) => {
   assert.equal(value.media.audioCodec, undefined);
   assert.equal(value.frames.length, 2);

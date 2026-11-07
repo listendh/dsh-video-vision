@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1
+
+- **Gap deltas.** Every pair of consecutive moments now reports how much the picture moved
+  between them (`<deltas>`, levels big / some / little). A vision model can see that cell 8
+  differs from cell 7; it cannot tell that this gap is the largest in the clip. This is the
+  comparison the scan already had and the model did not.
+- **Reading protocol.** Results carry a short `<how_to_read>` block: describe what changed,
+  guess the next moment before looking, then say whether the guess held, and only then write
+  the summary. One pass of "summarise this video" misses cuts and invents continuity.
+- **`carry` parameter.** Pass the previous chunk's summary when reading a long video in
+  windows; the next read starts by checking those claims against what it now sees, so early
+  misreadings get corrected instead of repeated.
+- New tests cover the delta table, the protocol block, and the carried summary.
+
 ## 0.3.0
 
 - **Shot detection.** The clip is now grouped into shots from a low-resolution colour proxy.

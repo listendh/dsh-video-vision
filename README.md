@@ -92,40 +92,51 @@ keep working exactly as before.
 | `width` | number | Long edge of one frame in pixels; never upscales |
 | `transcript` | boolean | Ask the mounted speech-to-text provider for a transcript |
 | `subtitles` | boolean | Include subtitle text the file already carries |
+| `layout` | `auto` \| `frames` \| `grid` | Contact sheet once the count reaches the config threshold, or one image per moment |
+| `carry` | string | Summary of an earlier chunk; this read continues from it instead of starting over |
 | `language` | string | Language hint for the transcript, and for choosing among subtitle tracks |
 
-What the model receives:
+What the model receives (contact-sheet layout):
 
 ```
 <path>C:\clips\demo.mp4</path>
 <type>video</type>
 <content>
-video, 6.02s, 640x360 px, 30 fps, h264, audio aac
-6 frames sampled from 0.50s to 5.52s, 2 of them placed where the picture changed most;
-each image below is preceded by its own timestamp in the clip.
-decoded by ffmpeg 6.1.1
+video, 25.68s, 1280x720 px, 56.6 fps, h264, audio aac
+12 moments sampled across 9 of 9 detected shots; delivered as one contact sheet: 4 columns x 3 rows, read row by row; every cell is labelled "#n <second>s" and the cell map below repeats it.
+decoded by ffmpeg N-92722-gf22fcd4483
 </content>
-<metadata>
-creation_time: 2025-03-04T05:06:07Z
-</metadata>
-
-frame 1/6 @ 0.50s
-[image]
-frame 2/6 @ 1.51s
-[image]
-…
-<subtitles source="embedded subtitle stream #2 (subrip, chi)" cues="3">
-[0:00] 你好，欢迎使用这个视频工具
-[0:02] 第二步：确认付款
-[0:04] 好了，马上结束
-</subtitles>
-<transcript unavailable="the audio track was not transcribed; the subtitle text below is what the video says"/>
-<warnings>- …</warnings>                           (when a frame had to be skipped)
+<cells>#1=1.35s  #2=4.30s  #3=5.90s  #4=10.17s  …</cells>
+<deltas>
+how much the picture moved between neighbouring moments:
+#5->#6 0.404 (large, usually a cut)
+#11->#12 0.000 (almost still)
+</deltas>
+[image: one labelled contact sheet]
+<how_to_read>
+1. Go through the moments in order. For each one, say what changed compared with the previous one…
+2. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held…
+3. Finish with one paragraph in time order…
+</how_to_read>
 ```
 
-Captions sit next to the images instead of inside a JSON blob, so the model can point at a
-moment ("around 1.5s") instead of guessing which picture is which. Subtitle text keeps its
-own timestamps, so it can quote what was said at 0:02 without any audio model.
+The delta table is measured from the same colour proxy the shot detector uses, so the model
+learns *which* gaps are the big ones — a comparison it cannot make from stills alone. The
+protocol asks for difference → prediction → check, because one pass of "summarise this video"
+misses cuts and invents continuity.
+
+### Reading a long video in chunks
+
+`read_video` returns one window at a time. To keep the later part coherent, hand the earlier
+summary back as `carry`:
+
+```
+read_video { path: "talk.mp4", start: 0,  end: 60, frames: 12 }   → summary A
+read_video { path: "talk.mp4", start: 60, end: 120, frames: 12, carry: "A" }  → summary B, corrected against A
+```
+
+Each call then starts by checking the carried claims against what the new moments show, so
+mistakes from the beginning are fixed later instead of being repeated.
 
 ---
 

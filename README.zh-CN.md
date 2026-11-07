@@ -85,39 +85,49 @@ dsh plugin add github:listendh/dsh-video-vision
 | `width` | 数字 | 单帧长边像素；比原片大时不会放大 |
 | `transcript` | 布尔 | 是否请求语音转写 |
 | `subtitles` | 布尔 | 是否读取文件里已有的字幕 |
+| `layout` | `auto` / `frames` / `grid` | 帧数达到阈值后拼成一张宫格，否则每帧一张图 |
+| `carry` | 字符串 | 上一段的摘要；这次读会从它接着往下走，而不是从头再来 |
 | `language` | 字符串 | 转写语言提示，也用来在多条字幕轨里挑一条 |
 
-模型实际拿到的东西长这样：
+模型实际拿到的东西长这样（宫格模式）：
 
 ```
 <path>C:\clips\demo.mp4</path>
 <type>video</type>
 <content>
-video, 6.02s, 640x360 px, 30 fps, h264, audio aac
-6 frames sampled from 0.50s to 5.52s, 2 of them placed where the picture changed most;
-each image below is preceded by its own timestamp in the clip.
-decoded by ffmpeg 6.1.1
+video, 25.68s, 1280x720 px, 56.6 fps, h264, audio aac
+12 moments sampled across 9 of 9 detected shots; delivered as one contact sheet: 4 columns x 3 rows…
+decoded by ffmpeg N-92722-gf22fcd4483
 </content>
-<metadata>
-creation_time: 2025-03-04T05:06:07Z
-</metadata>
-
-frame 1/6 @ 0.50s
-[图片]
-frame 2/6 @ 1.51s
-[图片]
-…
-<subtitles source="embedded subtitle stream #2 (subrip, chi)" cues="3">
-[0:00] 你好，欢迎使用这个视频工具
-[0:02] 第二步：确认付款
-[0:04] 好了，马上结束
-</subtitles>
-<transcript unavailable="音频没有转写；下面的字幕就是片子自己说的话"/>
-<warnings>- ……</warnings>                          （某帧解码失败时的说明）
+<cells>#1=1.35s  #2=4.30s  #3=5.90s  #4=10.17s  …</cells>
+<deltas>
+how much the picture moved between neighbouring moments:
+#5->#6 0.404 (large, usually a cut)
+#11->#12 0.000 (almost still)
+</deltas>
+[图片：一张带编号的宫格]
+<how_to_read>
+1. 按顺序逐格说清"这一格比上一格变了什么"…
+2. 看下一格之前先猜它会是什么样，看到之后再对一次…
+3. 最后用一段话按时间顺序讲完整条片子…
+</how_to_read>
 ```
 
-时间标签写在同一张图旁边，而不是塞进一段 JSON 里——这样模型能直接说"大约 1.5 秒那里"，
-而不是猜哪张图是哪个时刻。字幕带自己的时间轴，所以它能引用"第 2 秒那句台词"。
+时间标签烧在格子角上，还附一份 `#n=秒` 的对照表，所以模型能直接说"第 5 格"。
+**变化量表**（`<deltas>`）来自镜头检测用的同一个彩色代理，告诉模型哪两格之间变化最大——
+这是它光看静帧说不出来的。`<how_to_read>` 要求"先差异、再预测、后核对"，因为只让它
+"总结一下这个视频"，它会漏掉切点，还会自己补出不存在的连续性。
+
+### 长视频怎么分段读
+
+一次调用只返回一个窗口。想让后半段读得更合理，把上一段的摘要作为 `carry` 传回来：
+
+```
+read_video { path: "talk.mp4", start: 0,  end: 60,  frames: 12 }              → 摘要 A
+read_video { path: "talk.mp4", start: 60, end: 120, frames: 12, carry: "A" }  → 摘要 B，并会核对 A
+```
+
+每次都会先拿上一段的结论跟眼前的画面比一遍，所以**开头的误读会在后面被纠正**，而不是一路错到底。
 
 ---
 
