@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.6
+
+- **Repeat-dropping keeps a spread skeleton.** Farthest-point selection keeps whatever differs
+  most, and at the start of a clip that is usually a burst of movement: on a 28-second
+  single-take clip it kept four cells inside the first four seconds and nothing until 22.4,
+  leaving an eighteen-second hole. Two to four evenly spaced anchors are now kept before the
+  distinctness pass runs, so the biggest gap in that clip fell from 18.0 s to 10.9 s while the
+  fast-cut clip stayed untouched at 12 cells.
+
 ## 0.3.5
 
 - **Fixed: repeat detection compared motion instead of pictures.** A talking head keeps moving
