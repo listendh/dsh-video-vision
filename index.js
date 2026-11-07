@@ -52,6 +52,8 @@ const DEFAULTS = {
   gridCellWidth: 320,
   gridWhenAtLeast: 6,
   textFirst: false,
+  shortClipSeconds: 20,
+  shortClipFrames: 16,
   staticShotFloor: 0.02,
   minCellNovelty: 0.05,
   maxAudioSeconds: 600,
@@ -596,7 +598,14 @@ async function readVideo(ctx, config, args, exec) {
       if (clamped > 0) warnings.push(`${clamped} requested timestamp(s) fell outside the ${info.durationSeconds.toFixed(2)}s clip and were clamped to its last frame`);
     }
   } else {
-    const count = clampInteger(typeof args.frames === 'number' ? args.frames : configuredFrames, 1, maxFrames);
+    const requestedCount = clampInteger(typeof args.frames === 'number' ? args.frames : configuredFrames, 1, maxFrames);
+    // Short clips are where motion itself carries the point (gestures, meme imitations, dance);
+    // spacing them like a long vlog reads a moving subject as a still one.
+    const shortSeconds = clampInteger(pick(config, 'shortClipSeconds', DEFAULTS.shortClipSeconds), 1, 600);
+    const denseFrames = clampInteger(pick(config, 'shortClipFrames', DEFAULTS.shortClipFrames), 1, maxFrames);
+    const count = info.durationSeconds !== undefined && info.durationSeconds <= shortSeconds
+      ? Math.min(maxFrames, Math.max(requestedCount, denseFrames))
+      : requestedCount;
     const start = typeof args.start === 'number' ? args.start : undefined;
     const end = typeof args.end === 'number' ? args.end : undefined;
     const strategy = pick(config, 'sampling', DEFAULTS.sampling);
