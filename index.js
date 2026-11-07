@@ -1090,6 +1090,7 @@ function renderVideo(args, value) {
     const inventory = [
       '0. Inventory the frame before describing it: people (label them P1, P2…), what they wear, anything held, raised, or shown to the camera, key background objects, anything cut off by the frame edge, and platform overlays (watermark, buttons, account name) kept separate from the scene.',
       'For each object say whether it is really in the scene or added in post, and what tells you so: a held object moves with the hand, an overlay stays fixed while the camera moves, and a printed card has a straight edge and casts no shadow of its own.',
+      'Describe what you see before naming it. When the name of a food, brand, place, or object is genuinely uncertain, check it (a lookup, or a region re-read) instead of guessing — a verified name is evidence, an unverified one is invention.',
     ];
     if (textFirst) {
       // News clips, tutorials and screen recordings put their content in the words: the

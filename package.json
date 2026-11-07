@@ -1,6 +1,6 @@
 {
   "name": "dsh-video-vision",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Give DeepSeek Harness eyes for video: samples frames one per detected shot, delivers them as a labelled contact sheet, and reads subtitle text plus container metadata.",
   "keywords": [
     "dsh-plugin",
