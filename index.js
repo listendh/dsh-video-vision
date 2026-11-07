@@ -10,7 +10,9 @@
  * @module dsh-video-vision
  */
 
-import { basename, resolve as resolvePath } from 'node:path';
+import { writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, join, resolve as resolvePath } from 'node:path';
 
 import { pickChangeMoments, scanActivity, signatureDistance } from './lib/activity.js';
 import { composeGrid, planGrid } from './lib/grid.js';
@@ -426,7 +428,21 @@ async function transcribeAudio(ctx, ffmpeg, hostPath, options) {
   try {
     const snapshot = speech.snapshot();
     const providers = snapshot?.providers ?? [];
-    if (providers.length === 0) return { note: 'this profile registers no speech-to-text provider, so the audio track was not transcribed' };
+    if (providers.length === 0) {
+      // No speech service here, but the caller's own agent may still own a transcription tool.
+      // Hand over the audio file and say what to do next, so "listen to this" works for every
+      // user's dsh without this plugin adapting to any particular voice plugin.
+      try {
+        const wav = await grabAudioWav(ffmpeg, hostPath, { maxSeconds: maxAudioSeconds, signal });
+        const target = join(tmpdir(), `dsh-video-vision-audio-${process.pid}-${Date.now()}.wav`);
+        await writeFile(target, wav);
+        return {
+          note: `no speech-to-text service is mounted, so the audio was not transcribed; it was saved to ${target} — if a transcription tool is available, transcribe that file and continue`,
+        };
+      } catch {
+        return { note: 'this profile registers no speech-to-text provider, so the audio track was not transcribed' };
+      }
+    }
     const wav = await grabAudioWav(ffmpeg, hostPath, { maxSeconds: maxAudioSeconds, signal });
     if (wav === undefined) return { note: 'the video has no decodable audio track' };
     const spec = speech.resolve({ audio: wav, language });
