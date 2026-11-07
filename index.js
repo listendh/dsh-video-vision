@@ -54,6 +54,7 @@ const DEFAULTS = {
   textFirst: false,
   shortClipSeconds: 20,
   shortClipFrames: 16,
+  bgmApiKey: '',
   staticShotFloor: 0.02,
   minCellNovelty: 0.05,
   maxAudioSeconds: 600,
@@ -424,6 +425,38 @@ async function assertImageCapableRoute(ctx, exec, requested) {
  * @param {{ language: string, maxAudioSeconds: number, enabled: boolean, signal: AbortSignal }} options - transcript settings.
  * @returns {Promise<{ transcript?: { text: string, audioSeconds?: number, language?: string }, note?: string }>} the transcript or the honest reason it is absent.
  */
+/**
+ * Identify the background music, when the profile is given a fingerprint key.
+ *
+ * ASR turns speech into text and is blind to music: a clip that carries its meaning through a
+ * soundtrack (meme imitations, edits using a well-known theme) reads as silent without this.
+ * Fingerprinting needs a third-party service, so it stays optional and says so when absent.
+ * @param {{ command: string }} ffmpeg - the resolved decoder.
+ * @param {string} hostPath - absolute media path.
+ * @param {{ apiKey?: string, maxAudioSeconds: number, signal: AbortSignal }} options - fingerprint settings.
+ * @returns {Promise<string | undefined>} a one-line description, or undefined when unavailable.
+ */
+async function identifyBgm(ffmpeg, hostPath, options) {
+  const { apiKey, maxAudioSeconds, signal } = options;
+  if (apiKey === undefined || apiKey.trim() === '') return undefined;
+  try {
+    const wav = await grabAudioWav(ffmpeg, hostPath, { maxSeconds: Math.min(30, maxAudioSeconds), signal });
+    const form = new FormData();
+    form.append('api_token', apiKey.trim());
+    form.append('return', 'timecode,apple_music,spotify');
+    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'clip.wav');
+    const response = await fetch('https://api.audd.io/', { method: 'POST', body: form, signal });
+    if (!response.ok) return `BGM not identified (fingerprint service answered ${response.status})`;
+    const payload = await response.json();
+    const title = payload?.result?.title;
+    if (typeof title !== 'string' || title === '') return 'BGM not identified (no match in the fingerprint database)';
+    const artist = typeof payload?.result?.artist === 'string' ? payload.result.artist : '';
+    return `BGM: ${title}${artist === '' ? '' : ` - ${artist}`}`;
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    return `BGM not identified (${why})`;
+  }
+}
 async function transcribeAudio(ctx, ffmpeg, hostPath, options) {
   const { language, maxAudioSeconds, enabled, signal } = options;
   if (!enabled) return { note: 'the caller disabled the transcript' };
@@ -897,7 +930,14 @@ async function readVideo(ctx, config, args, exec) {
 
   // Subtitle text is the file's own words: prefer it over an audio guess, and never
   // claim a transcript we did not produce.
-  let transcript = audio.transcript;
+  const bgmLine = await identifyBgm(ffmpeg, source.hostPath, {
+    apiKey: typeof pick(config, 'bgmApiKey', DEFAULTS.bgmApiKey) === 'string' ? pick(config, 'bgmApiKey', DEFAULTS.bgmApiKey) : undefined,
+    maxAudioSeconds: clampInteger(pick(config, 'maxAudioSeconds', DEFAULTS.maxAudioSeconds), 5, 3_600),
+    signal: exec.signal,
+  });
+  if (bgmLine !== undefined) {
+    transcriptNote = transcriptNote === undefined ? bgmLine : bgmLine + '; ' + transcriptNote;
+  }  let transcript = audio.transcript;
   let transcriptNote = audio.note;
   if (subtitleResult.subtitles !== undefined) {
     transcript = undefined;
