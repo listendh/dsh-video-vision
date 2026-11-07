@@ -49,6 +49,15 @@
         gridMaxColumns: 4
         # Cell width inside that sheet, in pixels.
         gridCellWidth: 320
+        # Text-first reads treat on-screen text as the content: even sweep, no following of
+        # picture changes, and a transcription protocol instead of a picture description.
+        textFirst: false
+        # A shot whose average change per second stays below this counts as still and is
+        # capped at one frame, so it cannot soak up the budget.
+        staticShotFloor: 0.02
+        # Moments this similar in content (almost no motion in between) count as repeats;
+        # the later one is dropped.
+        minCellNovelty: 0.02
         # Seconds of audio prepared for transcription, and its language hint. The
         # language also picks among several subtitle tracks.
         maxAudioSeconds: 600

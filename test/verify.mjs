@@ -484,8 +484,10 @@ await scenario('shot detection finds the hard cuts', { path: 'cuts.mp4', frames:
 
 await scenario('grid layout delivers one contact sheet', { path: 'cuts.mp4', frames: 12, layout: 'grid' }, (value, blocks) => {
   assert.notEqual(value.grid, undefined);
-  assert.equal(value.frames.length, 12);
-  assert.equal(value.grid.columns * value.grid.rows >= 12, true);
+  // Still footage no longer absorbs the whole budget, so fewer than twelve moments survive;
+  // the sheet must hold exactly the moments that were kept.
+  assert.ok(value.frames.length >= 2 && value.frames.length <= 12, `got ${value.frames.length} moments`);
+  assert.equal(value.grid.columns * value.grid.rows >= value.frames.length, true);
   const images = blocks.filter((block) => block.type === 'image');
   assert.equal(images.length, 1, 'one contact sheet, not twelve images');
   assert.ok(images[0].attachment.bytes > 5_000, 'the sheet holds real pixels');
@@ -508,6 +510,22 @@ await scenario('a carried summary is echoed back for long clips', { path: 'sampl
   const text = blocks.map((block) => block.text ?? '').join('\n');
   assert.match(text, /<carry>\n前一段：一个彩色测试图在缓慢变化\n<\/carry>/u);
   assert.match(text, /comparing <carry> with what you now see/u);
+});
+
+await scenario('a still shot does not soak up the budget', { path: 'cuts.mp4', frames: 9, layout: 'frames' }, (value) => {
+  // Each of the three patterns holds still inside its shot, so the planner should keep close
+  // to one cell per shot instead of spending eight cells on identical pictures.
+  assert.ok(value.frames.length <= 5, `still shots should not soak up the budget, got ${value.frames.length}`);
+  assert.equal(value.shots.covered >= 2, true);
+});
+
+await scenario('text-first mode sweeps evenly and asks for the words', { path: 'sample.mp4', frames: 5, text: true }, (value, blocks) => {
+  assert.equal(value.textFirst, true);
+  assert.equal(value.sampling.strategy, 'even', 'text mode does not follow picture changes');
+  const text = blocks.map((block) => block.text ?? '').join('\n');
+  assert.match(text, /text-first read/u);
+  assert.match(text, /Write down every piece of on-screen text/u);
+  assert.match(text, /list the cells it covers/u);
 });
 
 await scenario('a video without an audio track', { path: 'silent.mp4', frames: 2 }, (value) => {

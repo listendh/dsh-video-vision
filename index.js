@@ -26,7 +26,7 @@ import {
   probeMedia,
   readFileBounded,
 } from './lib/media.js';
-import { detectShots, planShotFrames } from './lib/shots.js';
+import { detectShots, dropRepeatedMoments, planShotFrames } from './lib/shots.js';
 import { decodeSubtitleBytes, parseCues, renderCues } from './lib/subtitles.js';
 
 /** Cordis plugin name, also the id used by this package's patch row. */
@@ -47,6 +47,9 @@ const DEFAULTS = {
   gridMaxColumns: 4,
   gridCellWidth: 320,
   gridWhenAtLeast: 6,
+  textFirst: false,
+  staticShotFloor: 0.02,
+  minCellNovelty: 0.02,
   maxAudioSeconds: 600,
   language: 'zh',
   transcript: true,
@@ -108,6 +111,10 @@ const PARAMETERS = {
       type: 'string',
       description: 'Summary of the part of the clip you already read. Pass the previous summary here when reading a long video in chunks, so this read continues from it instead of starting over.',
     },
+    text: {
+      type: 'boolean',
+      description: 'Read on-screen text as the primary content: subtitles, headlines, name tags, location stamps, account names. Use it for talking-head, news, tutorial, and screen-recording clips, where the words carry more than the picture.',
+    },
     language: {
       type: 'string',
       description: 'Language hint for the transcript and for choosing among several subtitle tracks, such as zh or en.',
@@ -129,6 +136,7 @@ const OUTPUT_SCHEMA = {
       },
       required: ['path'],
     },
+    textFirst: { type: 'boolean' },
     media: {
       type: 'object',
       additionalProperties: false,
@@ -234,6 +242,7 @@ const OUTPUT_SCHEMA = {
         strategy: { type: 'string' },
         changeFrames: { type: 'number' },
         scannedSeconds: { type: 'number' },
+        deduped: { type: 'number' },
       },
       required: ['strategy'],
     },
@@ -518,6 +527,9 @@ async function readVideo(ctx, config, args, exec) {
   let shotsInfo;
   /** Change samples from the scan, reused later for the between-cell delta table. */
   let scanChanges;
+  // Text-first reads want an even sweep: burned-in subtitles change on their own schedule,
+  // which has nothing to do with where the picture moves most.
+  const textFirst = typeof args.text === 'boolean' ? args.text : pick(config, 'textFirst', DEFAULTS.textFirst);
   if (explicit.length > 0) {
     let clamped = 0;
     positions = [...new Set(explicit.map((value) => Math.max(0, Math.round(value * 1000) / 1000)))].sort((a, b) => a - b);
@@ -540,6 +552,7 @@ async function readVideo(ctx, config, args, exec) {
     const strategy = pick(config, 'sampling', DEFAULTS.sampling);
     const scanLimit = clampInteger(pick(config, 'motionScanMaxSeconds', DEFAULTS.motionScanMaxSeconds), 0, 86_400);
     const canScan = strategy !== 'even'
+      && !textFirst
       && info.durationSeconds !== undefined
       && info.durationSeconds <= scanLimit
       && count > 1;
@@ -564,7 +577,14 @@ async function readVideo(ctx, config, args, exec) {
         if (detected.shots.length >= 2) {
           // One frame per shot is how an edit with many cuts gets real coverage: the budget
           // buys different shots instead of several peaks inside the same one.
-          const planned = planShotFrames({ shots: detected.shots, count, start, end });
+          const planned = planShotFrames({
+            shots: detected.shots,
+            count,
+            start,
+            end,
+            changes: scan.changes,
+            staticFloor: Math.max(0.001, pick(config, 'staticShotFloor', DEFAULTS.staticShotFloor)),
+          });
           positions = planned.timestamps;
           shotsInfo.covered = planned.coveredShots;
           sampling = { strategy: 'shots', changeFrames: 0, scannedSeconds };
@@ -603,6 +623,24 @@ async function readVideo(ctx, config, args, exec) {
 
   const frameWidth = Math.min(maxWidth, typeof args.width === 'number' && Number.isFinite(args.width) ? Math.round(args.width) : maxWidth, info.video.width);
   const quality = clampInteger(pick(config, 'jpegQuality', DEFAULTS.jpegQuality), 2, 20);
+
+  // Defensive: two planners can land on the same second, and decoding it twice wastes a cell.
+  positions = [...new Set(positions.map((value) => Math.round(value * 1000) / 1000))].sort((a, b) => a - b);
+
+  // Text-first reads keep every moment: burned-in subtitles change while the picture does
+  // not, and a 64x36 proxy cannot see that change, so deduplicating there would delete the
+  // very lines the caller asked for.
+  if (scanChanges !== undefined && !textFirst && positions.length > 2) {
+    const deduped = dropRepeatedMoments({
+      timestamps: positions,
+      changes: scanChanges,
+      minNovelty: Math.max(0.001, pick(config, 'minCellNovelty', DEFAULTS.minCellNovelty)),
+    });
+    if (deduped.dropped > 0) {
+      positions = deduped.timestamps;
+      sampling = { ...sampling, deduped: deduped.dropped };
+    }
+  }
 
   const gridMode = resolveLayout(args, config, positions.length) === 'grid';
   const baseName = basename(source.displayPath).replace(/\.[^.]+$/u, '');
@@ -739,6 +777,7 @@ async function readVideo(ctx, config, args, exec) {
   const end = positions[positions.length - 1];
   return {
     source: { path: source.displayPath },
+    textFirst,
     media: {
       ...(info.durationSeconds === undefined ? {} : { durationSeconds: info.durationSeconds }),
       width: info.video.width,
@@ -810,7 +849,7 @@ function betweenDeltas(changes, moments) {
  * @returns {Array<Record<string, unknown>>} content blocks: text, then each frame's caption and image.
  */
 function renderVideo(args, value) {
-  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, shots, grid, deltas, warnings, decoder } = value;
+  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, shots, grid, deltas, textFirst, warnings, decoder } = value;
   const carry = typeof args?.carry === 'string' && args.carry.trim() !== '' ? args.carry.trim() : undefined;
   const placement = sampling?.strategy === 'explicit'
     ? 'positions were requested explicitly'
@@ -829,6 +868,10 @@ function renderVideo(args, value) {
       + `${media.fps === undefined ? '' : `, ${media.fps} fps`}, ${media.videoCodec}`
       + `${media.audioCodec === undefined ? ', no audio track' : `, audio ${media.audioCodec}`}`,
     `${placement}; ${delivery}`,
+    ...(textFirst === true ? ['this is a text-first read: on-screen text is the primary content, the picture is secondary.'] : []),
+    ...(typeof sampling?.deduped === 'number' && sampling.deduped > 0
+      ? [`${sampling.deduped} moment${sampling.deduped === 1 ? '' : 's'} showing the same picture as the one before were dropped, so the budget stays on different frames.`]
+      : []),
     `decoded by ffmpeg${decoder?.version === undefined ? '' : ` ${decoder.version}`}`,
     '</content>',
   ];
@@ -908,7 +951,18 @@ function renderVideo(args, value) {
   // readable line of reasoning. The protocol adapts to what the caller already knows.
   if (frames.length >= 3) {
     const steps = ['<how_to_read>'];
-    if (carry === undefined) {
+    if (textFirst) {
+      // News clips, tutorials and screen recordings put their content in the words: the
+      // headline banner, the burned-in subtitle, the name tag, the time stamp. A picture
+      // description of a talking head is worth almost nothing; the text timeline is the read.
+      steps.push(
+        '1. Write down every piece of on-screen text, cell by cell: burned-in subtitles, headline banners, name tags, location and date stamps, account names, watermarks.',
+        '2. When the same text stays on screen across several cells, write it once and list the cells it covers, for example: "日均要飞1000多公里 — cells 5,6,7,8". Do not repeat it once per cell.',
+        '3. Keep the original characters; do not translate, paraphrase, or complete a sentence that is cut off.',
+        '4. Then say, in two lines, what the clip is about — and whether the picture shows anything the text does not.',
+        'Never write text that is not visible in a cell.',
+      );
+    } else if (carry === undefined) {
       steps.push(
         '0. Before describing anything, state what you think this is: the kind of clip, the setting, and the arc you expect — each backed by a cell. Say it as a hypothesis that can turn out wrong.',
         '1. Then go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.3
+
+- **Still shots no longer soak up the budget.** Slots are allocated by how much is happening
+  inside a shot, not by how long it is; a shot whose picture barely moves is capped at one
+  frame. Measured on the talking-head screen recording: 10 requested moments became 7 useful
+  ones, with three copies of an unchanged picture dropped.
+- **Repeated moments are dropped.** Two samples with almost no motion between them show the
+  same thing, so the later one goes and the budget stays on different pictures. Reported as
+  `sampling.deduped` and stated in the envelope, never silently.
+- **`text` parameter (text-first reads).** For news clips, talking heads, tutorials and
+  screen recordings the content lives in the words on screen. Text-first switches to an even
+  sweep (burned-in subtitles change on their own schedule, not where the picture moves),
+  skips repeat-dropping so no subtitle line is lost, and replaces the reading protocol with a
+  transcription task: write every on-screen string cell by cell, write a line that persists
+  once and list the cells it covers, keep the original characters, never invent text.
+- Config: `textFirst`, `staticShotFloor`, `minCellNovelty`.
+
 ## 0.3.2
 
 - **The reading protocol adapts to what the caller already knows.** A first read now opens

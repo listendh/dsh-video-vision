@@ -94,7 +94,13 @@ keep working exactly as before.
 | `subtitles` | boolean | Include subtitle text the file already carries |
 | `layout` | `auto` \| `frames` \| `grid` | Contact sheet once the count reaches the config threshold, or one image per moment |
 | `carry` | string | Summary of an earlier chunk; this read continues from it instead of starting over |
+| `text` | boolean | Read on-screen text as the primary content (news, talking head, tutorial, screen recording) |
 | `language` | string | Language hint for the transcript, and for choosing among subtitle tracks |
+
+Moments follow the content, not the clock: slots go to shots that actually change, a still
+shot is capped at one frame, and two samples showing the same picture are collapsed into one
+(`sampling.deduped` says how many). Text-first reads the other way — an even sweep that keeps
+every moment, because burned-in subtitles change while the picture does not.
 
 What the model receives (contact-sheet layout):
 
