@@ -430,8 +430,8 @@ async function transcribeAudio(ctx, ffmpeg, hostPath, options) {
       const wav = await grabAudioWav(ffmpeg, hostPath, { maxSeconds: maxAudioSeconds, signal });
       const target = join(tmpdir(), 'dsh-video-vision-audio-' + process.pid + '-' + Date.now() + '.wav');
       await writeFile(target, wav);
-      return { note: 
       return { note: 'no speech-to-text service is mounted, so the audio was not transcribed; it was saved to ' + target + ' - if a transcription tool is available, transcribe that file and continue' };
+    }
     } catch (error) {
       const why = error instanceof Error ? error.message : String(error);
       return { note: 'no speech-to-text provider is mounted and audio extraction failed (' + why + '), so the audio track was not transcribed' };
