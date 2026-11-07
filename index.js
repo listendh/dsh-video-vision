@@ -13,10 +13,12 @@
 import { basename, resolve as resolvePath } from 'node:path';
 
 import { pickChangeMoments, scanActivity } from './lib/activity.js';
+import { composeGrid, planGrid } from './lib/grid.js';
 import {
   extractSubtitleStream,
-  findSidecarSubtitles,
   findFfmpeg,
+  findLabelFont,
+  findSidecarSubtitles,
   grabAudioWav,
   grabFrameWithRetry,
   isRegularFile,
@@ -24,6 +26,7 @@ import {
   probeMedia,
   readFileBounded,
 } from './lib/media.js';
+import { detectShots, planShotFrames } from './lib/shots.js';
 import { decodeSubtitleBytes, parseCues, renderCues } from './lib/subtitles.js';
 
 /** Cordis plugin name, also the id used by this package's patch row. */
@@ -36,9 +39,14 @@ export const inject = ['tools'];
 const DEFAULTS = {
   ffmpegPath: '',
   defaultFrames: 8,
-  maxFrames: 16,
+  maxFrames: 24,
   maxFrameWidth: 1024,
   jpegQuality: 3,
+  layout: 'auto',
+  gridColumns: 0,
+  gridMaxColumns: 4,
+  gridCellWidth: 320,
+  gridWhenAtLeast: 6,
   maxAudioSeconds: 600,
   language: 'zh',
   transcript: true,
@@ -46,9 +54,12 @@ const DEFAULTS = {
   maxSubtitleChars: 6000,
   sampling: 'auto',
   motionScanMaxSeconds: 600,
-  motionFps: 4,
+  motionFps: 0,
   changeShare: 0.6,
   minChangeGapSeconds: 0.6,
+  shotRatio: 3,
+  shotFloor: 0.03,
+  minShotSeconds: 0.5,
 };
 
 /** Model-facing parameter schema: raw JSON Schema, the form the tool registry forwards. */
@@ -87,6 +98,11 @@ const PARAMETERS = {
     subtitles: {
       type: 'boolean',
       description: 'Include subtitle text the file already carries (an embedded track or a .srt/.vtt file beside it). Defaults to the plugin config.',
+    },
+    layout: {
+      type: 'string',
+      enum: ['auto', 'frames', 'grid'],
+      description: 'How sampled frames are delivered: `grid` sends one labelled contact sheet (cheap, wide coverage), `frames` sends each frame as its own image (more detail per moment), `auto` picks grid for larger frame counts.',
     },
     language: {
       type: 'string',
@@ -148,6 +164,7 @@ const OUTPUT_SCHEMA = {
         type: 'object',
         additionalProperties: false,
         properties: {
+          index: { type: 'number' },
           seconds: { type: 'number' },
           attachmentId: { type: 'string' },
           mediaType: { type: 'string' },
@@ -156,8 +173,33 @@ const OUTPUT_SCHEMA = {
           height: { type: 'number' },
           name: { type: 'string' },
         },
-        required: ['seconds', 'attachmentId', 'mediaType', 'bytes', 'width', 'height'],
+        required: ['seconds'],
       },
+    },
+    grid: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        attachmentId: { type: 'string' },
+        mediaType: { type: 'string' },
+        bytes: { type: 'number' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        columns: { type: 'number' },
+        rows: { type: 'number' },
+        name: { type: 'string' },
+      },
+      required: ['attachmentId', 'columns', 'rows'],
+    },
+    shots: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        count: { type: 'number' },
+        method: { type: 'string' },
+        covered: { type: 'number' },
+      },
+      required: ['count', 'method', 'covered'],
     },
     bounds: {
       type: 'object',
@@ -238,6 +280,34 @@ function clampInteger(value, min, max) {
   const rounded = Math.round(value);
   if (!Number.isFinite(rounded)) return min;
   return Math.min(max, Math.max(min, rounded));
+}
+
+/**
+ * Proxy sampling rate for the motion scan. Short clips get a finer signal because a cut
+ * lasts a smaller fraction of them; long clips stay cheap because their cuts are coarser
+ * relative to the whole.
+ * @param {number} duration - clip length in seconds.
+ * @returns {number} frames per second for the scan.
+ */
+function fpsForDuration(duration) {
+  if (duration <= 60) return 10;
+  if (duration <= 300) return 6;
+  return 4;
+}
+
+/**
+ * Decide how sampled moments reach the model.
+ * @param {Record<string, unknown>} args - tool arguments.
+ * @param {Record<string, unknown>} config - row config.
+ * @param {number} count - number of sampled moments.
+ * @returns {'grid' | 'frames'} the delivery mode.
+ */
+function resolveLayout(args, config, count) {
+  const requested = typeof args.layout === 'string' ? args.layout : pick(config, 'layout', DEFAULTS.layout);
+  if (requested === 'grid') return 'grid';
+  if (requested === 'frames') return 'frames';
+  const threshold = clampInteger(pick(config, 'gridWhenAtLeast', DEFAULTS.gridWhenAtLeast), 1, 48);
+  return count >= threshold ? 'grid' : 'frames';
 }
 
 /**
@@ -427,6 +497,7 @@ async function readVideo(ctx, config, args, exec) {
   const lastFrame = info.durationSeconds === undefined ? undefined : Math.max(0, info.durationSeconds - 0.05);
   let positions;
   let sampling = { strategy: 'explicit' };
+  let shotsInfo;
   if (explicit.length > 0) {
     let clamped = 0;
     positions = [...new Set(explicit.map((value) => Math.max(0, Math.round(value * 1000) / 1000)))].sort((a, b) => a - b);
@@ -448,32 +519,52 @@ async function readVideo(ctx, config, args, exec) {
     const end = typeof args.end === 'number' ? args.end : undefined;
     const strategy = pick(config, 'sampling', DEFAULTS.sampling);
     const scanLimit = clampInteger(pick(config, 'motionScanMaxSeconds', DEFAULTS.motionScanMaxSeconds), 0, 86_400);
-    const canScan = strategy === 'auto'
+    const canScan = strategy !== 'even'
       && info.durationSeconds !== undefined
       && info.durationSeconds <= scanLimit
       && count > 1;
     if (canScan) {
       try {
+        const scanFps = clampInteger(pick(config, 'motionFps', DEFAULTS.motionFps), 0, 12) || fpsForDuration(info.durationSeconds);
         const scan = await scanActivity(ffmpeg, source.hostPath, {
-          fps: clampInteger(pick(config, 'motionFps', DEFAULTS.motionFps), 1, 12),
+          fps: scanFps,
           limitSeconds: Math.ceil(info.durationSeconds),
           signal: exec.signal,
         });
-        const picked = pickChangeMoments({
-          changes: scan.changes,
+        const detected = detectShots(scan.changes, {
           duration: info.durationSeconds,
-          count,
-          start,
-          end,
-          changeShare: Math.min(1, Math.max(0, pick(config, 'changeShare', DEFAULTS.changeShare))),
-          minGapSeconds: Math.max(0.2, pick(config, 'minChangeGapSeconds', DEFAULTS.minChangeGapSeconds)),
+          fps: scanFps,
+          ratio: Math.max(1.5, pick(config, 'shotRatio', DEFAULTS.shotRatio)),
+          floor: Math.max(0.005, pick(config, 'shotFloor', DEFAULTS.shotFloor)),
+          minShotSeconds: Math.max(0.2, pick(config, 'minShotSeconds', DEFAULTS.minShotSeconds)),
         });
-        positions = picked.timestamps;
-        sampling = {
-          strategy: 'auto',
-          changeFrames: picked.changeFrames,
-          scannedSeconds: Math.round(scan.sampledSeconds * 100) / 100,
-        };
+        const scannedSeconds = Math.round(scan.sampledSeconds * 100) / 100;
+        shotsInfo = { count: detected.shots.length, method: detected.method, covered: 0 };
+        if (detected.shots.length >= 2) {
+          // One frame per shot is how an edit with many cuts gets real coverage: the budget
+          // buys different shots instead of several peaks inside the same one.
+          const planned = planShotFrames({ shots: detected.shots, count, start, end });
+          positions = planned.timestamps;
+          shotsInfo.covered = planned.coveredShots;
+          sampling = { strategy: 'shots', changeFrames: 0, scannedSeconds };
+          if (planned.coveredShots < detected.shots.length) {
+            warnings.push(`${detected.shots.length} shots detected but only ${planned.coveredShots} fit the frame budget; narrow the window or ask for more frames to see the rest`);
+          }
+        } else {
+          // A single continuous shot has no cuts to distribute over, so fall back to the
+          // change-aware placement: it is the case that placement was built for.
+          const picked = pickChangeMoments({
+            changes: scan.changes,
+            duration: info.durationSeconds,
+            count,
+            start,
+            end,
+            changeShare: Math.min(1, Math.max(0, pick(config, 'changeShare', DEFAULTS.changeShare))),
+            minGapSeconds: Math.max(0.2, pick(config, 'minChangeGapSeconds', DEFAULTS.minChangeGapSeconds)),
+          });
+          positions = picked.timestamps;
+          sampling = { strategy: 'auto', changeFrames: picked.changeFrames, scannedSeconds };
+        }
       } catch (error) {
         warnings.push(`motion scan failed, frames were spaced evenly instead: ${error instanceof Error ? error.message : String(error)}`);
         positions = planEvenTimestamps({ duration: info.durationSeconds, count, start, end });
@@ -482,7 +573,7 @@ async function readVideo(ctx, config, args, exec) {
     } else {
       positions = planEvenTimestamps({ duration: info.durationSeconds, count, start, end });
       sampling = { strategy: 'even' };
-      if (strategy === 'auto' && info.durationSeconds !== undefined && info.durationSeconds > scanLimit) {
+      if (strategy !== 'even' && info.durationSeconds !== undefined && info.durationSeconds > scanLimit) {
         warnings.push(`this clip is ${Math.round(info.durationSeconds)}s long, past the ${scanLimit}s motion-scan budget, so frames were spaced evenly; pass timestamps to look at a specific moment`);
       }
     }
@@ -492,37 +583,98 @@ async function readVideo(ctx, config, args, exec) {
   const frameWidth = Math.min(maxWidth, typeof args.width === 'number' && Number.isFinite(args.width) ? Math.round(args.width) : maxWidth, info.video.width);
   const quality = clampInteger(pick(config, 'jpegQuality', DEFAULTS.jpegQuality), 2, 20);
 
+  const gridMode = resolveLayout(args, config, positions.length) === 'grid';
+  const baseName = basename(source.displayPath).replace(/\.[^.]+$/u, '');
   const frames = [];
-  for (const seconds of positions) {
-    if (exec.signal.aborted) break;
-    let grabbed;
-    try {
-      grabbed = await grabFrameWithRetry(ffmpeg, source.hostPath, seconds, {
-        width: frameWidth,
-        quality,
-        signal: exec.signal,
+  let grid;
+
+  if (gridMode) {
+    // One contact sheet: the budget buys the same number of moments for a tenth of the
+    // tokens, because the provider charges per image, not per tile inside it.
+    const columns = clampInteger(pick(config, 'gridColumns', DEFAULTS.gridColumns), 0, 8);
+    const shape = planGrid(positions.length, columns > 0 ? columns : DEFAULTS.gridMaxColumns);
+    const cellWidth = clampInteger(pick(config, 'gridCellWidth', DEFAULTS.gridCellWidth), 160, 640);
+    if (findLabelFont() === undefined) {
+      warnings.push('no usable font was found, so contact-sheet cells are not labelled; use the cell map in this result to tell them apart');
+    }
+    const cells = [];
+    for (const [index, seconds] of positions.entries()) {
+      if (exec.signal.aborted) break;
+      let grabbed;
+      try {
+        grabbed = await grabFrameWithRetry(ffmpeg, source.hostPath, seconds, {
+          width: cellWidth,
+          quality,
+          label: `#${index + 1} ${seconds.toFixed(1)}s`,
+          signal: exec.signal,
+        });
+      } catch (error) {
+        warnings.push(`cell ${index + 1} at ${seconds.toFixed(2)}s could not be decoded: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      cells.push({ seconds: grabbed.seconds, data: grabbed.data });
+    }
+    if (cells.length > 0) {
+      try {
+        const composed = await composeGrid(ffmpeg, cells, {
+          columns: shape.columns,
+          rows: Math.ceil(cells.length / shape.columns),
+          quality,
+          signal: exec.signal,
+        });
+        const ref = await attachments.saveImage({ data: composed, mediaType: 'image/jpeg', name: `${baseName}-grid.jpg` });
+        grid = {
+          attachmentId: ref.attachmentId,
+          mediaType: ref.mediaType,
+          bytes: ref.bytes,
+          width: ref.width,
+          height: ref.height,
+          columns: shape.columns,
+          rows: Math.ceil(cells.length / shape.columns),
+          ...(ref.name === undefined ? {} : { name: ref.name }),
+        };
+        cells.forEach((cell, index) => {
+          frames.push({ index: index + 1, seconds: cell.seconds });
+        });
+      } catch (error) {
+        warnings.push(`the contact sheet could not be composed, frames were returned separately: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  if (!gridMode || grid === undefined) {
+    for (const seconds of positions) {
+      if (exec.signal.aborted) break;
+      let grabbed;
+      try {
+        grabbed = await grabFrameWithRetry(ffmpeg, source.hostPath, seconds, {
+          width: frameWidth,
+          quality,
+          signal: exec.signal,
+        });
+      } catch (error) {
+        warnings.push(`frame at ${seconds.toFixed(2)}s could not be decoded: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      const label = `${baseName}@${grabbed.seconds.toFixed(2)}s.jpg`;
+      let ref;
+      try {
+        ref = await attachments.saveImage({ data: grabbed.data, mediaType: 'image/jpeg', name: label });
+      } catch (error) {
+        warnings.push(`frame at ${seconds.toFixed(2)}s was rejected by the attachment service: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
+      frames.push({
+        index: frames.length + 1,
+        seconds: grabbed.seconds,
+        attachmentId: ref.attachmentId,
+        mediaType: ref.mediaType,
+        bytes: ref.bytes,
+        width: ref.width,
+        height: ref.height,
+        ...(ref.name === undefined ? {} : { name: ref.name }),
       });
-    } catch (error) {
-      warnings.push(`frame at ${seconds.toFixed(2)}s could not be decoded: ${error instanceof Error ? error.message : String(error)}`);
-      continue;
     }
-    const label = `${basename(source.displayPath).replace(/\.[^.]+$/u, '')}@${grabbed.seconds.toFixed(2)}s.jpg`;
-    let ref;
-    try {
-      ref = await attachments.saveImage({ data: grabbed.data, mediaType: 'image/jpeg', name: label });
-    } catch (error) {
-      warnings.push(`frame at ${seconds.toFixed(2)}s was rejected by the attachment service: ${error instanceof Error ? error.message : String(error)}`);
-      continue;
-    }
-    frames.push({
-      seconds: grabbed.seconds,
-      attachmentId: ref.attachmentId,
-      mediaType: ref.mediaType,
-      bytes: ref.bytes,
-      width: ref.width,
-      height: ref.height,
-      ...(ref.name === undefined ? {} : { name: ref.name }),
-    });
   }
 
   if (frames.length === 0) {
@@ -577,6 +729,8 @@ async function readVideo(ctx, config, args, exec) {
     frames,
     bounds: { start, end },
     sampling,
+    ...(shotsInfo === undefined ? {} : { shots: shotsInfo }),
+    ...(grid === undefined ? {} : { grid }),
     ...(subtitleResult.subtitles === undefined ? {} : { subtitles: subtitleResult.subtitles }),
     ...(subtitleResult.subtitles !== undefined || subtitleResult.note === undefined ? {} : { subtitleNote: subtitleResult.note }),
     ...(transcript === undefined ? {} : { transcript }),
@@ -600,12 +754,16 @@ function secondsLabel(seconds) {
  * @returns {Array<Record<string, unknown>>} content blocks: text, then each frame's caption and image.
  */
 function renderVideo(value) {
-  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, warnings, decoder } = value;
-  const samplingLine = sampling?.strategy === 'explicit'
+  const { source, media, frames, bounds, subtitles, subtitleNote, transcript, transcriptNote, sampling, shots, grid, warnings, decoder } = value;
+  const placement = sampling?.strategy === 'explicit'
     ? 'positions were requested explicitly'
-    : `${frames.length} frame${frames.length === 1 ? '' : 's'} sampled from ${secondsLabel(bounds.start)} to ${secondsLabel(bounds.end)}`
-      + `${sampling?.changeFrames > 0 ? `, ${sampling.changeFrames} of them placed where the picture changed most` : ', evenly spaced'}`
-      + '; each image below is preceded by its own timestamp in the clip.';
+    : sampling?.strategy === 'shots'
+      ? `${frames.length} moment${frames.length === 1 ? '' : 's'} sampled across ${shots?.covered ?? frames.length} of ${shots?.count ?? frames.length} detected shots`
+      : `${frames.length} frame${frames.length === 1 ? '' : 's'} sampled from ${secondsLabel(bounds.start)} to ${secondsLabel(bounds.end)}`
+        + `${sampling?.changeFrames > 0 ? `, ${sampling.changeFrames} of them placed where the picture changed most` : ', evenly spaced'}`;
+  const delivery = grid === undefined
+    ? 'each image below is preceded by its own timestamp in the clip.'
+    : `delivered as one contact sheet: ${grid.columns} columns x ${grid.rows} rows, read row by row; every cell is labelled "#n <second>s" and the cell map below repeats it.`;
   const lines = [
     `<path>${source.path}</path>`,
     '<type>video</type>',
@@ -613,7 +771,7 @@ function renderVideo(value) {
     `video, ${media.durationSeconds === undefined ? 'unknown duration' : secondsLabel(media.durationSeconds)}, ${media.width}x${media.height} px`
       + `${media.fps === undefined ? '' : `, ${media.fps} fps`}, ${media.videoCodec}`
       + `${media.audioCodec === undefined ? ', no audio track' : `, audio ${media.audioCodec}`}`,
-    samplingLine,
+    `${placement}; ${delivery}`,
     `decoded by ffmpeg${decoder?.version === undefined ? '' : ` ${decoder.version}`}`,
     '</content>',
   ];
@@ -622,21 +780,42 @@ function renderVideo(value) {
     for (const tag of media.tags) lines.push(`${tag.name}: ${tag.value}`);
     lines.push('</metadata>');
   }
+  if (grid !== undefined) {
+    lines.push(`<cells>${frames.map((frame) => `#${frame.index}=${frame.seconds.toFixed(2)}s`).join('  ')}</cells>`);
+    if (shots !== undefined && shots.covered < shots.count) {
+      lines.push(`(${shots.count - shots.covered} of the ${shots.count} detected shots were not shown; pass a narrower start/end or more frames to cover them)`);
+    }
+  }
   const blocks = [{ type: 'text', text: lines.join('\n') }];
-  frames.forEach((frame, index) => {
-    blocks.push({ type: 'text', text: `frame ${index + 1}/${frames.length} @ ${secondsLabel(frame.seconds)}` });
+  if (grid !== undefined) {
     blocks.push({
       type: 'image',
       attachment: {
-        attachmentId: frame.attachmentId,
-        mediaType: frame.mediaType,
-        bytes: frame.bytes,
-        width: frame.width,
-        height: frame.height,
-        ...(frame.name === undefined ? {} : { name: frame.name }),
+        attachmentId: grid.attachmentId,
+        mediaType: grid.mediaType,
+        bytes: grid.bytes,
+        width: grid.width,
+        height: grid.height,
+        ...(grid.name === undefined ? {} : { name: grid.name }),
       },
     });
-  });
+  } else {
+    frames.forEach((frame, index) => {
+      if (frame.attachmentId === undefined) return;
+      blocks.push({ type: 'text', text: `frame ${index + 1}/${frames.length} @ ${secondsLabel(frame.seconds)}` });
+      blocks.push({
+        type: 'image',
+        attachment: {
+          attachmentId: frame.attachmentId,
+          mediaType: frame.mediaType,
+          bytes: frame.bytes,
+          width: frame.width,
+          height: frame.height,
+          ...(frame.name === undefined ? {} : { name: frame.name }),
+        },
+      });
+    });
+  }
   const tail = [];
   if (subtitles !== undefined) {
     tail.push(`<subtitles source="${subtitles.source}" cues="${subtitles.cueCount}"${subtitles.truncated === true ? ' truncated="true"' : ''}>`);
@@ -676,8 +855,10 @@ export function apply(ctx, rawConfig) {
       'Look at a video file. Samples frames across the clip with ffmpeg and returns them as images you can see, '
       + 'each preceded by its timestamp, together with duration, resolution, codec, container metadata such as the '
       + 'recording date, any subtitle text the file already carries, and — when this profile mounts a speech-to-text '
-      + 'provider — a transcript of the audio track. Frames are placed on the biggest picture changes first, so a brief '
-      + 'moment is likely to be captured. Use it to describe what happens in a video, read on-screen text, identify '
+      + 'provider — a transcript of the audio track. Frames are placed one per detected shot (or on the biggest '
+      + 'picture changes when the clip has no cuts), so a brief moment is likely to be captured. Larger frame counts '
+      + 'come back as one labelled contact sheet, which is far cheaper than separate images. Use it to describe what '
+      + 'happens in a video, read on-screen text, identify '
       + 'people, objects, or actions, quote what is said, or answer questions about specific moments. Positions and '
       + 'durations are in seconds; to inspect one moment closely, pass explicit timestamps.',
     parameters: PARAMETERS,

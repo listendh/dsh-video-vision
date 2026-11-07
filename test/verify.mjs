@@ -364,9 +364,18 @@ async function callTool(definition, args, cwd) {
 /** Assert the projection every successful read must have. */
 function assertProjection(value, blocks) {
   const images = blocks.filter((block) => block.type === 'image');
-  assert.equal(images.length, value.frames.length, 'every frame becomes one image block');
   assert.equal(blocks[0].type, 'text', 'the envelope leads the projection');
   assert.match(blocks[0].text, /<type>video<\/type>/u);
+  assert.ok(value.frames.length > 0, 'a successful read reports at least one moment');
+  if (value.grid !== undefined) {
+    assert.equal(images.length, 1, 'a contact sheet is one image block');
+    assert.equal(images[0].attachment.attachmentId, value.grid.attachmentId);
+    assert.equal(value.grid.columns * value.grid.rows >= value.frames.length, true, 'the grid holds every moment');
+    assert.match(blocks[0].text, /contact sheet/u);
+    assert.match(blocks[0].text, /<cells>#1=/u);
+    return;
+  }
+  assert.equal(images.length, value.frames.length, 'every frame becomes one image block');
   value.frames.forEach((frame, index) => {
     assert.ok(frame.bytes > 500, `frame ${index} carries bytes`);
     assert.ok(frame.width > 8 && frame.height > 8, `frame ${index} has a decoded size`);
@@ -379,7 +388,7 @@ function assertProjection(value, blocks) {
 await ensureClips();
 
 const report = [];
-const TEST_CONFIG = { defaultFrames: 6, maxFrames: 8, maxFrameWidth: 512 };
+const TEST_CONFIG = { defaultFrames: 6, maxFrames: 12, maxFrameWidth: 512 };
 const scenario = async (label, args, check, config = TEST_CONFIG) => {
   const { definition } = install({}, config);
   const started = Date.now();
@@ -410,11 +419,18 @@ await scenario('even sampling over the whole clip', { path: 'sample.mp4' }, (val
   assert.equal(value.subtitleNote.includes('no subtitle track'), true);
 });
 
-await scenario('motion-aware sampling lands on the cuts', { path: 'cuts.mp4', frames: 6 }, (value) => {
-  assert.ok(value.sampling.changeFrames >= 1, `at least one frame came from a picture change, got ${value.sampling.changeFrames}`);
-  const cuts = [2, 4];
-  const nearCut = value.frames.filter((frame) => cuts.some((cut) => Math.abs(frame.seconds - cut) <= 0.4));
-  assert.ok(nearCut.length >= 1, `a frame should land near a cut, got ${value.frames.map((frame) => frame.seconds).join(', ')}`);
+await scenario('sampling follows the edit rather than blind spacing', { path: 'cuts.mp4', frames: 6 }, (value) => {
+  // Either strategy is legitimate here: shots when cuts are detected, change peaks when
+  // the clip is one continuous take. Blind even spacing is the one outcome that would mean
+  // the scan did not run at all.
+  const followed = value.sampling.strategy === 'shots' || value.sampling.changeFrames >= 1;
+  assert.ok(followed, `sampling should react to the picture, got ${JSON.stringify(value.sampling)}`);
+  // Frames sit *inside* shots rather than exactly on the cut, so require real spread across
+  // the clip instead of a frame within 0.4 s of the boundary.
+  const seconds = value.frames.map((frame) => frame.seconds);
+  assert.ok(Math.min(...seconds) < 2, `a frame should come from the first shot, got ${seconds.join(', ')}`);
+  assert.ok(Math.max(...seconds) > 4, `a frame should come from the last shot, got ${seconds.join(', ')}`);
+  assert.ok(value.shots === undefined || value.shots.covered >= 2, 'at least two distinct shots should be represented');
 });
 
 await scenario('embedded subtitle track is read as text', { path: 'subtitled.mp4', frames: 2 }, (value) => {
@@ -454,6 +470,26 @@ await scenario('explicit timestamps, sorted and clamped into the clip', { path: 
 await scenario('one frame with a width cap', { path: 'sample.mp4', frames: 1, width: 200 }, (value) => {
   assert.equal(value.frames.length, 1);
   assert.equal(value.frames[0].width, 200);
+});
+
+await scenario('shot detection finds the hard cuts', { path: 'cuts.mp4', frames: 6, layout: 'frames' }, (value) => {
+  assert.equal(value.shots.method, 'local-median');
+  assert.ok(value.shots.count >= 2, `three joined patterns should expose at least two cuts, got ${value.shots.count}`);
+  assert.equal(value.sampling.strategy, 'shots');
+  assert.ok(value.shots.covered >= 2);
+  const cutTimes = [2, 4];
+  const nearCut = value.frames.filter((frame) => cutTimes.some((cut) => Math.abs(frame.seconds - cut) <= 1));
+  assert.ok(nearCut.length >= 2, `frames should land inside the detected shots, got ${value.frames.map((frame) => frame.seconds).join(', ')}`);
+});
+
+await scenario('grid layout delivers one contact sheet', { path: 'cuts.mp4', frames: 12, layout: 'grid' }, (value, blocks) => {
+  assert.notEqual(value.grid, undefined);
+  assert.equal(value.frames.length, 12);
+  assert.equal(value.grid.columns * value.grid.rows >= 12, true);
+  const images = blocks.filter((block) => block.type === 'image');
+  assert.equal(images.length, 1, 'one contact sheet, not twelve images');
+  assert.ok(images[0].attachment.bytes > 5_000, 'the sheet holds real pixels');
+  assert.ok(images[0].attachment.width >= 4 * 160, 'cells keep a usable width');
 });
 
 await scenario('a video without an audio track', { path: 'silent.mp4', frames: 2 }, (value) => {

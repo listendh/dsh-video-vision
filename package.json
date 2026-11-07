@@ -1,7 +1,7 @@
 {
   "name": "dsh-video-vision",
-  "version": "0.2.3",
-  "description": "Give DeepSeek Harness eyes for video: adds a read_video tool that samples frames from a video file and hands them to the model as images, places frames on the biggest picture changes, and adds subtitle text and container metadata.",
+  "version": "0.3.0",
+  "description": "Give DeepSeek Harness eyes for video: samples frames one per detected shot, delivers them as a labelled contact sheet, and reads subtitle text plus container metadata.",
   "keywords": [
     "dsh-plugin",
     "dsh-bundle",

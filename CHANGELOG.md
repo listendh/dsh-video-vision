@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0
+
+- **Shot detection.** The clip is now grouped into shots from a low-resolution colour proxy.
+  `scdet` is missing from several ffmpeg builds, so the detector is our own: each change
+  sample is scored against the median change in its own neighbourhood, which separates a cut
+  from ordinary motion without one magic threshold for every kind of clip. Frames go one per
+  shot, so a fast edit spends its budget on different shots instead of several peaks inside
+  one. Measured on a 26 s Douyin edit: 9 shots found, 12 frames covering all 9.
+- **Contact-sheet layout.** Larger frame counts are tiled into one labelled image instead of
+  one image per frame. Sixteen moments cost roughly one thousand vision tokens instead of
+  sixteen thousand, and every cell is burned with `#n <second>s` plus a cell map in the text.
+  A full-resolution second look stays one `timestamps` call away.
+- The proxy switched from grayscale to colour: a cut that only changes hue (navy to purple)
+  was invisible in luma and is now detected.
+- Labels survive stripped ffmpeg builds: a minimal fontconfig file is written once and passed
+  through `FONTCONFIG_FILE`, because `drawtext` otherwise fails with "impossible to init
+  fontconfig" even when `fontfile` is absolute.
+- New tool parameter `layout` (auto / frames / grid) and config: `layout`, `gridColumns`,
+  `gridMaxColumns`, `gridCellWidth`, `gridWhenAtLeast`, `shotRatio`, `shotFloor`,
+  `minShotSeconds`, and `motionFps: 0` now means "pick a rate from the clip length".
+- Tests cover shot detection on a hard-cut clip and the contact-sheet projection.
+
 ## 0.2.3
 
 - The package now points at its public repository, so the registry page links to the

@@ -21,19 +21,34 @@
         maxFrameWidth: 1024
         # JPEG quality handed to ffmpeg (2 = best, 31 = worst).
         jpegQuality: 3
-        # Frame placement. "auto" reads a tiny grayscale proxy of the whole clip and
-        # puts frames where the picture changed most, filling the rest evenly;
-        # "even" skips that pass and spaces frames evenly.
+        # Frame placement. "auto" scans a low-resolution colour proxy, groups the clip
+        # into shots and takes one frame per shot (falling back to picture-change peaks
+        # when the clip has no cuts); "even" skips that pass and spaces frames evenly.
         sampling: auto
-        # Longest clip the motion pass will scan, in seconds. Longer clips fall back
-        # to even spacing with a note, unless the caller passes timestamps.
+        # Longest clip the motion scan will read, in seconds. Longer clips fall back to
+        # even spacing with a note, unless the caller passes timestamps.
         motionScanMaxSeconds: 600
-        # Proxy sampling rate for that pass, in frames per second (1-12).
-        motionFps: 4
-        # Share of the frame budget that may be spent on picture changes (0-1).
+        # Proxy sampling rate. 0 picks one from the clip length (10 fps up to 60 s,
+        # 6 fps up to 5 min, 4 fps beyond); 1-12 forces a rate.
+        motionFps: 0
+        # A boundary is a change at least `shotRatio` times the median change around it,
+        # above `shotFloor`, and no closer than `minShotSeconds` to the previous one.
+        shotRatio: 3
+        shotFloor: 0.03
+        minShotSeconds: 0.5
+        # Share of the budget spent on picture changes (0-1); used only without cuts.
         changeShare: 0.6
         # Minimum spacing between two frames chosen for motion, in seconds.
         minChangeGapSeconds: 0.6
+        # Delivery. "auto" sends one contact sheet once the frame count reaches
+        # `gridWhenAtLeast`, and separate images below it; "grid"/"frames" force a mode.
+        layout: auto
+        gridWhenAtLeast: 6
+        # 0 chooses columns from the frame count (up to `gridMaxColumns`).
+        gridColumns: 0
+        gridMaxColumns: 4
+        # Cell width inside that sheet, in pixels.
+        gridCellWidth: 320
         # Seconds of audio prepared for transcription, and its language hint. The
         # language also picks among several subtitle tracks.
         maxAudioSeconds: 600
