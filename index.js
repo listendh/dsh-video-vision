@@ -111,6 +111,15 @@ const PARAMETERS = {
       type: 'string',
       description: 'Summary of the part of the clip you already read. Pass the previous summary here when reading a long video in chunks, so this read continues from it instead of starting over.',
     },
+    at: {
+      type: 'number',
+      description: 'Second to decode when `region` is given; defaults to the first sampled moment.',
+    },
+    region: {
+      type: 'array',
+      items: { type: 'number' },
+      description: 'Rectangle to re-read at its own resolution, as fractions of the frame: [x, y, width, height]. Use it when a cell is too small to identify a prop, a piece of text, or a detail.',
+    },
     text: {
       type: 'boolean',
       description: 'Read on-screen text as the primary content: subtitles, headlines, name tags, location stamps, account names. Use it for talking-head, news, tutorial, and screen-recording clips, where the words carry more than the picture.',
@@ -137,6 +146,18 @@ const OUTPUT_SCHEMA = {
       required: ['path'],
     },
     textFirst: { type: 'boolean' },
+    region: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        x: { type: 'number' },
+        y: { type: 'number' },
+        width: { type: 'number' },
+        height: { type: 'number' },
+        second: { type: 'number' },
+      },
+      required: ['x', 'y', 'width', 'height', 'second'],
+    },
     media: {
       type: 'object',
       additionalProperties: false,
@@ -635,6 +656,69 @@ async function readVideo(ctx, config, args, exec) {
 
   const frameWidth = Math.min(maxWidth, typeof args.width === 'number' && Number.isFinite(args.width) ? Math.round(args.width) : maxWidth, info.video.width);
   const quality = clampInteger(pick(config, 'jpegQuality', DEFAULTS.jpegQuality), 2, 20);
+
+  // A region read answers "I cannot tell what that thing is". The downscale that makes a
+  // contact sheet cheap also destroys small props, so one rectangle is decoded at its own
+  // resolution instead of being squeezed into a cell.
+  const region = Array.isArray(args.region) && args.region.length === 4 && args.region.every((value) => typeof value === 'number' && Number.isFinite(value))
+    ? args.region
+    : undefined;
+  if (region !== undefined) {
+    const [fx, fy, fw, fh] = region;
+    const crop = {
+      x: Math.max(0, Math.round(Math.min(0.99, Math.max(0, fx)) * info.video.width)),
+      y: Math.max(0, Math.round(Math.min(0.99, Math.max(0, fy)) * info.video.height)),
+      width: Math.max(16, Math.round(Math.min(1, Math.max(0.01, fw)) * info.video.width)),
+      height: Math.max(16, Math.round(Math.min(1, Math.max(0.01, fh)) * info.video.height)),
+    };
+    crop.width = Math.min(crop.width, info.video.width - crop.x);
+    crop.height = Math.min(crop.height, info.video.height - crop.y);
+    const at = typeof args.at === 'number' && Number.isFinite(args.at)
+      ? Math.max(0, Math.min(info.durationSeconds === undefined ? args.at : info.durationSeconds - 0.05, args.at))
+      : (positions[0] ?? 0);
+    const data = await grabFrameWithRetry(ffmpeg, source.hostPath, at, {
+      width: Math.min(maxWidth, crop.width),
+      quality,
+      crop,
+      signal: exec.signal,
+    });
+    const ref = await attachments.saveImage({
+      data: data.data,
+      mediaType: 'image/jpeg',
+      name: `${basename(source.displayPath).replace(/\.[^.]+$/u, '')}@${data.seconds.toFixed(2)}s-region.jpg`,
+    });
+    return {
+      source: { path: source.displayPath },
+      textFirst,
+      media: {
+        ...(info.durationSeconds === undefined ? {} : { durationSeconds: info.durationSeconds }),
+        width: info.video.width,
+        height: info.video.height,
+        ...(info.video.fps === undefined ? {} : { fps: info.video.fps }),
+        videoCodec: info.video.codec,
+        ...(info.audio === undefined ? {} : { audioCodec: info.audio.codec }),
+        ...(info.tags.length === 0 ? {} : { tags: info.tags }),
+      },
+      decoder: {
+        ...(ffmpeg.version === undefined ? {} : { version: ffmpeg.version }),
+        origin: ffmpeg.origin,
+      },
+      frames: [{
+        index: 1,
+        seconds: data.seconds,
+        attachmentId: ref.attachmentId,
+        mediaType: ref.mediaType,
+        bytes: ref.bytes,
+        width: ref.width,
+        height: ref.height,
+        ...(ref.name === undefined ? {} : { name: ref.name }),
+      }],
+      region: { x: crop.x, y: crop.y, width: crop.width, height: crop.height, second: data.seconds },
+      bounds: { start: data.seconds, end: data.seconds },
+      sampling: { strategy: 'region' },
+      ...(warnings.length === 0 ? {} : { warnings }),
+    };
+  }
 
   // Defensive: two planners can land on the same second, and decoding it twice wastes a cell.
   positions = [...new Set(positions.map((value) => Math.round(value * 1000) / 1000))].sort((a, b) => a - b);

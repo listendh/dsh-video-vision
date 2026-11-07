@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0
+
+- **New: `region` re-read.** `read_video { path, at: 1.2, region: [x, y, w, h] }` decodes one
+  rectangle at its own resolution instead of squeezing it into a contact-sheet cell. The
+  contact sheet is cheap because each cell is roughly 320 px wide and the provider caps one
+  image at about a thousand vision tokens; a prop that occupies 300 px of a 1440 px frame
+  therefore arrives as 70 px and cannot be identified. Asking for the rectangle again keeps
+  those pixels. Fractions are relative to the frame, the result reports the pixel rectangle.
+- The reading protocol now asks for an inventory before any description, and says to ask for a
+  region when a cell is too small — the failure that made this release necessary.
+
 ## 0.3.7
 
 - **Fixed: a prop held up to the camera was reported as an overlay.** A clip where the subject
