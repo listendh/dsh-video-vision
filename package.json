@@ -1,6 +1,6 @@
 {
   "name": "dsh-video-vision",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Give DeepSeek Harness eyes for video: adds a read_video tool that samples frames from a video file and hands them to the model as images, places frames on the biggest picture changes, and adds subtitle text and container metadata.",
   "keywords": [
     "dsh-plugin",
@@ -15,7 +15,7 @@
     "read_video"
   ],
   "license": "MIT",
-  "author": "dsh-video-vision contributors",
+  "author": "listendh",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -49,5 +49,13 @@
   },
   "optionalDependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aaaaa-1111111/dsh-video-vision.git"
+  },
+  "bugs": {
+    "url": "https://github.com/aaaaa-1111111/dsh-video-vision/issues"
+  },
+  "homepage": "https://github.com/aaaaa-1111111/dsh-video-vision#readme"
 }

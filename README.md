@@ -49,6 +49,15 @@ dsh plugin add dsh-video-vision
 Then restart the Harness (a new plugin generation is loaded only at startup on profiles
 without hot reload) and open a new session.
 
+Straight from the source tree, to try an unreleased change or when the registry is
+unreachable:
+
+```sh
+dsh plugin add github:aaaaa-1111111/dsh-video-vision
+```
+
+Repository: <https://github.com/aaaaa-1111111/dsh-video-vision>
+
 The tool appears as `read_video`. Nothing else changes: models without a video request
 keep working exactly as before.
 
