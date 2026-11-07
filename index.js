@@ -548,6 +548,7 @@ async function readVideo(ctx, config, args, exec) {
 
   const source = await resolveSource(ctx, exec, requested);
   const warnings = [];
+  warnings.push('plugin module loaded from ' + import.meta.url);
   const ffmpeg = await findFfmpeg({
     configuredPath: pick(config, 'ffmpegPath', DEFAULTS.ffmpegPath),
     signal: exec.signal,
