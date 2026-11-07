@@ -636,7 +636,8 @@ async function readVideo(ctx, config, args, exec) {
     // spacing them like a long vlog reads a moving subject as a still one.
     const shortSeconds = clampInteger(pick(config, 'shortClipSeconds', DEFAULTS.shortClipSeconds), 1, 600);
     const denseFrames = clampInteger(pick(config, 'shortClipFrames', DEFAULTS.shortClipFrames), 1, maxFrames);
-    const count = info.durationSeconds !== undefined && info.durationSeconds <= shortSeconds
+    // An explicit frame count is a decision by the caller - never overrun it.
+    const count = typeof args.frames !== 'number' && info.durationSeconds !== undefined && info.durationSeconds <= shortSeconds
       ? Math.min(maxFrames, Math.max(requestedCount, denseFrames))
       : requestedCount;
     const start = typeof args.start === 'number' ? args.start : undefined;
