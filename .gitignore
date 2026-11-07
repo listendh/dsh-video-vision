@@ -1,0 +1,9 @@
+node_modules/
+.verify/
+demo/build/
+demo/font.ttc
+*.log
+.DS_Store
+Thumbs.db
+*.tgz
+

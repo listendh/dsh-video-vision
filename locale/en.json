@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Video Vision",
+    "description": "Adds the read_video tool: samples frames from a video file and hands them to the model as images, so it can describe what happens, read on-screen text, and answer questions about specific moments."
+  }
+}

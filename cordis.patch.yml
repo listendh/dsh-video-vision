@@ -1,0 +1,48 @@
+# Bundle layer of dsh-video-vision.
+#
+# It inserts exactly one Host row, which registers the `read_video` tool. Every
+# config field is optional; the values below are the defaults, restated so the
+# row shows what can be tuned.
+- insert:
+    - id: video-vision
+      name: 'dsh-video-vision'
+      config:
+        # Absolute path to an ffmpeg executable. Empty means auto-detect, in this
+        # order: the decoder bundled by this package, $DSH_FFMPEG, the system PATH,
+        # the usual install locations, then a time-boxed scan of user app
+        # directories whose result is cached under $DSH_HOME/cache/dsh-video-vision.
+        ffmpegPath: ''
+        # Frame count when the model does not ask for a specific number, and the
+        # hard cap for any single call.
+        defaultFrames: 8
+        maxFrames: 16
+        # Long edge of one sampled frame, in pixels. Never upscales: a 480p clip
+        # stays 480p, and the provider caps one image at 1024 vision tokens.
+        maxFrameWidth: 1024
+        # JPEG quality handed to ffmpeg (2 = best, 31 = worst).
+        jpegQuality: 3
+        # Frame placement. "auto" reads a tiny grayscale proxy of the whole clip and
+        # puts frames where the picture changed most, filling the rest evenly;
+        # "even" skips that pass and spaces frames evenly.
+        sampling: auto
+        # Longest clip the motion pass will scan, in seconds. Longer clips fall back
+        # to even spacing with a note, unless the caller passes timestamps.
+        motionScanMaxSeconds: 600
+        # Proxy sampling rate for that pass, in frames per second (1-12).
+        motionFps: 4
+        # Share of the frame budget that may be spent on picture changes (0-1).
+        changeShare: 0.6
+        # Minimum spacing between two frames chosen for motion, in seconds.
+        minChangeGapSeconds: 0.6
+        # Seconds of audio prepared for transcription, and its language hint. The
+        # language also picks among several subtitle tracks.
+        maxAudioSeconds: 600
+        language: zh
+        # Ask the mounted speech-to-text provider for a transcript. An embedded
+        # subtitle track is preferred over an audio guess.
+        transcript: true
+        # Read subtitle text the file already carries: an embedded track, or a
+        # .srt/.vtt/.ass file saved beside the video.
+        subtitles: true
+        # Character budget for that subtitle text.
+        maxSubtitleChars: 6000
