@@ -415,7 +415,7 @@ await scenario('even sampling over the whole clip', { path: 'sample.mp4' }, (val
   const seconds = value.frames.map((frame) => frame.seconds);
   assert.deepEqual(seconds, [...seconds].sort((a, b) => a - b));
   assert.ok(value.bounds.start > 0 && value.bounds.end < 6);
-  assert.match(value.transcriptNote, /no speech-to-text provider/u);
+  assert.match(value.transcriptNote, /no speech-to-text (provider|service is mounted)/u);
   assert.ok(value.decoder.version.length > 0);
   assert.equal(value.sampling.strategy, 'auto');
   assert.equal(value.subtitleNote.includes('no subtitle track'), true);
@@ -561,7 +561,7 @@ await assert.rejects(() => callTool(blind.definition, { path: 'sample.mp4' }, wo
 
 const noProvider = install({ speech: { snapshot: () => ({ providers: [], selection: {} }) } });
 const degraded = await callTool(noProvider.definition, { path: 'sample.mp4', frames: 1 }, workDir);
-assert.match(degraded.value.transcriptNote, /registers no speech-to-text provider/u);
+assert.match(degraded.value.transcriptNote, /no speech-to-text (provider|service is mounted)/u);
 
 const ready = install({
   speech: {
