@@ -985,33 +985,43 @@ function renderVideo(args, value) {
   // still clip with only a pair, and "compare these two frames" is still a useful read.
   if (frames.length >= 2) {
     const steps = ['<how_to_read>'];
+    // Static things are the blind spot of frame-to-frame reading: an object held up to the
+    // camera does not change, so "what changed?" walks straight past it. Inventory first.
+    const inventory = [
+      '0. Inventory the frame before describing it: people (label them P1, P2…), what they wear, anything held, raised, or shown to the camera, key background objects, anything cut off by the frame edge, and platform overlays (watermark, buttons, account name) kept separate from the scene.',
+      'For each object say whether it is really in the scene or added in post, and what tells you so: a held object moves with the hand, an overlay stays fixed while the camera moves, and a printed card has a straight edge and casts no shadow of its own.',
+    ];
     if (textFirst) {
       // News clips, tutorials and screen recordings put their content in the words: the
       // headline banner, the burned-in subtitle, the name tag, the time stamp. A picture
       // description of a talking head is worth almost nothing; the text timeline is the read.
       steps.push(
+        ...inventory,
         '1. Write down every piece of on-screen text, cell by cell: burned-in subtitles, headline banners, name tags, location and date stamps, account names, watermarks.',
         '2. When the same text stays on screen across several cells, write it once and list the cells it covers, for example: "日均要飞1000多公里 — cells 5,6,7,8". Do not repeat it once per cell.',
         '3. Keep the original characters; do not translate, paraphrase, or complete a sentence that is cut off.',
-        '4. Then say, in two lines, what the clip is about — and whether the picture shows anything the text does not.',
+        '4. Name any object being shown to the camera even when its text is unreadable — the object itself can be the point of the clip.',
+        '5. Then say, in two lines, what the clip is about — and whether the picture shows anything the text does not.',
         'Never write text that is not visible in a cell.',
       );
     } else if (carry === undefined) {
       steps.push(
-        '0. Before describing anything, state what you think this is: the kind of clip, the setting, and the arc you expect — each backed by a cell. Say it as a hypothesis that can turn out wrong.',
-        '1. Then go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',
+        ...inventory,
+        '1. Then state what you think this is: the kind of clip, the setting, and the arc you expect — each backed by a cell. Say it as a hypothesis that can turn out wrong.',
+        '2. Go through the moments in order. For each one, say what changed compared with the previous one: what appeared, what left, what moved, which on-screen text changed.',
         Array.isArray(deltas) && deltas.length > 0
-          ? 'Use <deltas> to see which gaps are the big ones; a large gap is usually a cut, and a small one means the camera stayed put.'
-          : 'Judge the size of each change from the images themselves.',
-        '2. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held, and what it got wrong.',
-        '3. Finish with one paragraph in time order: what the clip is, what happens, and what you could not see. Never invent dialogue or events the frames do not show.',
+          ? 'Use <deltas> to see how the cutting is paced between moments; "no cuts" means one continuous take.'
+          : 'Judge the pacing from the images themselves.',
+        '3. Before you look at the next moment, guess what it will show. When you get there, say whether the guess held, and what it got wrong.',
+        '4. Finish with one paragraph in time order: what the clip is, what happens, and what you could not see. Describe emotion by what is visible (eyes closed, mouth corners up), not by motive. List what is too small or too blurred to identify rather than guessing it. Never invent dialogue or events the frames do not show.',
       );
     } else {
       steps.push(
+        ...inventory,
         '1. Begin by comparing <carry> with what you now see: which earlier claims still hold, and which these moments contradict.',
         '2. Then write one line per moment as a ledger: expected X | saw Y | held or broken. Keep the expectation and the observation separate — that difference is the point of this read.',
         '3. Name the cells where the clip most sharply broke your expectation; a deliberate edit usually sits exactly there.',
-        '4. Finish with an updated paragraph in time order that replaces the carried summary. Never invent dialogue or events the frames do not show.',
+        '4. Finish with an updated paragraph in time order that replaces the carried summary, including objects the earlier read missed. Never invent dialogue or events the frames do not show.',
       );
     }
     steps.push('</how_to_read>');

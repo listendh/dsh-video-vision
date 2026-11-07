@@ -514,6 +514,11 @@ await scenario('gaps between moments report the cuts inside them', { path: 'cuts
   assert.match(text, /cut/u);
   assert.match(text, /<how_to_read>/u, 'the reading protocol travels with the images');
   assert.match(text, /guess what it will show/u);
+  // Static props are the blind spot that let a card held up to the camera be reported as an
+  // overlay; the inventory step must stay in every non-text protocol.
+  assert.match(text, /Inventory the frame before describing it/u);
+  assert.match(text, /anything held, raised, or shown to the camera/u);
+  assert.match(text, /really in the scene or added in post/u);
 });
 
 await scenario('a carried summary is echoed back for long clips', { path: 'sample.mp4', frames: 3, carry: '前一段：一个彩色测试图在缓慢变化' }, (value, blocks) => {

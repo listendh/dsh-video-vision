@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.7
+
+- **Fixed: a prop held up to the camera was reported as an overlay.** A clip where the subject
+  holds a printed illustration toward the lens was read as "a small illustration pinned in the
+  lower-left corner" — the prop that *is* the premise of the video went missing, because the
+  protocol asked only "what changed", and a held card does not change. Every non-text read now
+  opens with an inventory: people (labelled), clothing, anything held/raised/shown, key
+  background objects, anything cut off by the frame edge, and platform overlays kept separate
+  from the scene — plus a test that says whether an object is really in the scene or added in
+  post, and what tells you so (a held object moves with the hand, an overlay stays put while
+  the camera moves, a printed card has a straight edge and no shadow of its own).
+- Emotion is now reported as visible features rather than motives, and anything too small or
+  blurred to identify must be listed instead of guessed.
+
 ## 0.3.6
 
 - **Repeat-dropping keeps a spread skeleton.** Farthest-point selection keeps whatever differs
